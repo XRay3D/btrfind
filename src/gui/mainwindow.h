@@ -36,6 +36,7 @@ public:
     void setFolder(const QString& dir);  // ограничить поиск папкой ("" — везде)
     void setQuery(const QString& q);
     void bringToFront();
+    void setVisibleColumns(const QList<int>& columns);  // остальные скрыть
 
 protected:
     void closeEvent(QCloseEvent* e) override;

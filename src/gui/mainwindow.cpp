@@ -548,6 +548,11 @@ void MainWindow::setQuery(const QString& q) {
     runSearch();
 }
 
+void MainWindow::setVisibleColumns(const QList<int>& columns) {
+    QHeaderView* hh = view_->horizontalHeader();
+    for (int c = 0; c < ResultModel::ColumnCount; ++c) hh->setSectionHidden(c, c != ResultModel::Name && !columns.contains(c));
+}
+
 void MainWindow::bringToFront() {
     if (isMinimized()) showNormal();
     show();

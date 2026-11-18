@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     QCommandLineOption in(QStringLiteral("in"), QStringLiteral("Искать только в папке."), QStringLiteral("dir"));
     QCommandLineOption socket(QStringLiteral("socket"), QStringLiteral("Сокет демона."), QStringLiteral("path"),
                               QString::fromLatin1(bx::proto::kDefaultSocket));
-    QCommandLineOption newwin(QStringLiteral("new-window"), QStringLiteral("Не передавать запрос открытому окну."));
+    QCommandLineOption newwin(QStringLiteral("new-window"), QStringLiteral("Открыть отдельное окно (не передавать запрос открытому)."));
     p.addOptions({in, socket, newwin});
     p.addPositionalArgument(QStringLiteral("запрос"), QStringLiteral("Начальный запрос."));
     p.process(app);
@@ -72,9 +72,12 @@ int main(int argc, char** argv) {
     bx::Client client(p.value(socket));
     bx::MainWindow w(&client);
 
+    // Окно с --new-window — отдельное: не забирает общий сокет у основного окна.
     QLocalServer instance;
-    QLocalServer::removeServer(instance_name());
-    instance.listen(instance_name());
+    if (!p.isSet(newwin)) {
+        QLocalServer::removeServer(instance_name());  // выше проверено: живого окна нет, сокет устарел
+        instance.listen(instance_name());
+    }
     QObject::connect(&instance, &QLocalServer::newConnection, &w, [&] {
         while (QLocalSocket* s = instance.nextPendingConnection()) {
             QObject::connect(s, &QLocalSocket::readyRead, &w, [s, &w] {
@@ -90,11 +93,19 @@ int main(int argc, char** argv) {
         }
     });
 
+    // Для снимков экрана (README): набор видимых столбцов из окружения.
+    if (const QString cols = qEnvironmentVariable("BTRFIND_COLUMNS"); !cols.isEmpty()) {
+        QList<int> list;
+        for (const QString& c : cols.split(QLatin1Char(','))) list << c.toInt();
+        w.setVisibleColumns(list);
+    }
     if (!folder.isEmpty()) w.setFolder(folder);
     if (has_query) w.setQuery(query);
     w.show();
     client.connectToDaemon();
     // Отладка/проверка: снимок окна и выход (BTRFIND_SCREENSHOT=/путь/к/файлу.png).
+    if (const QString size = qEnvironmentVariable("BTRFIND_SCREENSHOT_SIZE"); !size.isEmpty())  // например 1100x680
+        w.resize(size.section(QLatin1Char('x'), 0, 0).toInt(), size.section(QLatin1Char('x'), 1, 1).toInt());
     if (const QString shot = qEnvironmentVariable("BTRFIND_SCREENSHOT"); !shot.isEmpty())
         QTimer::singleShot(qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") > 0 ? qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") : 3000, &w, [&w, shot] {
             w.grab().save(shot);
