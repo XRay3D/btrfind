@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 
+#include "renamedialog.h"
 #include "resultmodel.h"
 
 #include <QAction>
@@ -18,6 +19,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QScrollBar>
 #include <QSettings>
@@ -144,6 +146,9 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     act(tr("Найти"), {}, QKeySequence::Find, [this] { edit_->setFocus(); edit_->selectAll(); });
     act(tr("Обновить"), {}, QKeySequence::Refresh, [this] { runSearch(); });
     act(tr("Выход"), {}, QKeySequence::Quit, [this] { close(); });
+    act(tr("Переименовать…"), {}, QKeySequence(Qt::Key_F2), [this] { renameSelected(); });
+    // В строке поиска Ctrl+Z отменяет ввод (QLineEdit перехватывает сочетание сам).
+    act(tr("Отменить переименование"), {}, QKeySequence::Undo, [this] { undoRename(); });
 
     // Поиск при вводе
     debounce_.setSingleShot(true);
@@ -374,6 +379,68 @@ void MainWindow::restoreSelection(int first, int last) {
     restoring_ = false;
 }
 
+void MainWindow::renameSelected() {
+    const QModelIndexList rows = view_->selectionModel()->selectedRows();
+    if (rows.isEmpty()) return;
+    const QStringList paths = selectedPaths();
+    if (paths.size() != rows.size()) {
+        statusBar()->showMessage(tr("Не все выделенные строки загружены — прокрутите к ним или выделите меньше"), 6000);
+        return;
+    }
+    RenameResult r;
+    if (paths.size() == 1) {
+        const bool isdir = rows[0].siblingAtColumn(0).data(ResultModel::IsDirRole).toBool();
+        if (!rename_single(this, paths[0], isdir, r)) return;
+    } else {
+        RenameDialog d(paths, this);
+        if (d.exec() != QDialog::Accepted) return;
+        r = d.result();
+    }
+    if (r.done.empty()) return;
+    lastRename_ = r.done;
+    applyRenamed(r.done);
+    statusBar()->showMessage(tr("Переименовано: %1 · Ctrl+Z — отменить").arg(r.done.size()), 10000);
+}
+
+void MainWindow::undoRename() {
+    if (lastRename_.empty()) {
+        statusBar()->showMessage(tr("Нечего отменять"), 3000);
+        return;
+    }
+    const RenameResult r = undo_rename(lastRename_);
+    lastRename_.clear();
+    applyRenamed(r.done);
+    if (!r.errors.isEmpty()) {
+        QMessageBox box(QMessageBox::Warning, tr("Отмена переименования"),
+                        tr("Возвращено: %1, не удалось: %2.").arg(r.done.size()).arg(r.errors.size()), QMessageBox::Ok,
+                        this);
+        box.setDetailedText(r.errors.join(QLatin1Char('\n')));
+        box.exec();
+    }
+    statusBar()->showMessage(tr("Возвращено прежних имён: %1").arg(r.done.size()), 6000);
+}
+
+void MainWindow::applyRenamed(const std::vector<RenameDone>& done) {
+    // Выделение и текущая строка следуют за файлами (и за содержимым переименованных папок).
+    auto remap = [](QString& p, const QString& from, const QString& to) {
+        if (p == from)
+            p = to;
+        else if (p.startsWith(from + QLatin1Char('/')))
+            p = to + p.mid(from.size());
+    };
+    for (const RenameDone& d : done) {
+        const QString from = d.old_path(), to = d.new_path();
+        QSet<QString> next;
+        for (QString p : std::as_const(selPaths_)) {
+            remap(p, from, to);
+            next.insert(p);
+        }
+        selPaths_ = std::move(next);
+        remap(curPath_, from, to);
+    }
+    if (!refreshTimer_.isActive()) refreshTimer_.start();  // демон пришлёт «changed», но обновим и сами
+}
+
 QStringList MainWindow::selectedPaths() const {
     QStringList out;
     for (const QModelIndex& i : view_->selectionModel()->selectedRows()) {
@@ -440,6 +507,14 @@ void MainWindow::showContextMenu(const QPoint& pos) {
     m.addAction(QIcon::fromTheme(QStringLiteral("edit-copy-path")), tr("Копировать полный путь"),
                 QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C), this, &MainWindow::copyPaths);
     m.addAction(tr("Копировать имя"), this, &MainWindow::copyNames);
+    m.addSeparator();
+    const int nsel = int(view_->selectionModel()->selectedRows().size());
+    m.addAction(QIcon::fromTheme(QStringLiteral("edit-rename")),
+                nsel > 1 ? tr("Переименовать %1 объектов…").arg(nsel) : tr("Переименовать…"),
+                QKeySequence(Qt::Key_F2), this, &MainWindow::renameSelected);
+    if (!lastRename_.empty())
+        m.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), tr("Отменить переименование"), QKeySequence::Undo,
+                    this, &MainWindow::undoRename);
     m.addSeparator();
     m.addAction(QIcon::fromTheme(QStringLiteral("system-search")), tr("Искать в «%1»").arg(isdir ? full : dir), this,
                 [this, isdir, full, dir] { setFolder(isdir ? full : dir); });

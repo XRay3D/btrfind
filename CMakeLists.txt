@@ -43,6 +43,7 @@ add_library(btrfind_core STATIC
     src/core/query.cpp
     src/core/search.cpp
     src/core/protocol.cpp
+    src/core/rename.cpp
 )
 target_include_directories(btrfind_core PUBLIC src/core)
 target_compile_options(btrfind_core PRIVATE ${BTRFIND_WARNINGS})
@@ -84,6 +85,7 @@ if(BTRFIND_BUILD_GUI)
         src/gui/resultmodel.cpp
         src/gui/mainwindow.cpp
         src/gui/icons.cpp
+        src/gui/renamedialog.cpp
     )
     target_include_directories(btrfind PRIVATE src/gui)
     target_compile_options(btrfind PRIVATE ${BTRFIND_WARNINGS})
@@ -103,4 +105,7 @@ if(BTRFIND_BUILD_TESTS)
     add_executable(test_core tests/test_core.cpp)
     target_link_libraries(test_core PRIVATE btrfind_core Qt6::Test)
     add_test(NAME test_core COMMAND test_core)
+    add_executable(test_rename tests/test_rename.cpp)
+    target_link_libraries(test_rename PRIVATE btrfind_core Qt6::Test)
+    add_test(NAME test_rename COMMAND test_rename)
 endif()

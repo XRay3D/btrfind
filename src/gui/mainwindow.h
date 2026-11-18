@@ -1,6 +1,7 @@
 #pragma once
 
 #include "client.h"
+#include "rename.h"
 
 #include <QCborMap>
 #include <QMainWindow>
@@ -44,6 +45,9 @@ private:
     void copyFiles();
     QString filterText() const;
     void restoreSelection(int first, int last);
+    void renameSelected();
+    void undoRename();
+    void applyRenamed(const std::vector<RenameDone>& done);  // перенести выделение на новые пути
 
     Client* c_;
     ResultModel* model_;
@@ -56,6 +60,7 @@ private:
     QSet<QString> selPaths_;  // выделение «по файлам», а не по номерам строк
     QString curPath_;
     bool restoring_ = false;
+    std::vector<RenameDone> lastRename_;  // последняя партия — для отмены
     QString folder_;
     QString sort_ = QStringLiteral("name");
     bool desc_ = false;

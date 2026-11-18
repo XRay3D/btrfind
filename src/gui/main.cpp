@@ -11,7 +11,10 @@
 #include <QDir>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QLibraryInfo>
+#include <QLocale>
 #include <QTimer>
+#include <QTranslator>
 
 namespace {
 
@@ -41,6 +44,10 @@ int main(int argc, char** argv) {
     QApplication::setOrganizationName(QStringLiteral("btrfind"));
     QApplication::setApplicationVersion(QStringLiteral(BTRFIND_VERSION));
     QApplication::setDesktopFileName(QStringLiteral("btrfind"));
+    static QTranslator qt_tr;  // «Отмена», «Да» и т.п. в стандартных кнопках Qt
+    if (qt_tr.load(QLocale(), QStringLiteral("qtbase"), QStringLiteral("_"),
+                   QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
+        QApplication::installTranslator(&qt_tr);
 
     QCommandLineParser p;
     p.setApplicationDescription(QStringLiteral("Мгновенный поиск файлов на btrfs"));
