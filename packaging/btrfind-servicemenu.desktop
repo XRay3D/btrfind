@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=inode/directory;
+Actions=btrfindSearchHere;
+X-KDE-Priority=TopLevel
+Icon=system-search
+
+[Desktop Action btrfindSearchHere]
+Name=Search here with btrfind…
+Name[ru]=Искать здесь (btrfind)…
+Icon=system-search
+Exec=btrfind --in %f

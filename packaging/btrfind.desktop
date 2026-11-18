@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=btrfind
+GenericName=Поиск файлов
+GenericName[en]=File Search
+Comment=Мгновенный поиск файлов и папок по имени (btrfs)
+Comment[en]=Instant file and folder search by name (btrfs)
+Exec=btrfind %U
+Icon=system-search
+Terminal=false
+Categories=Utility;FileTools;Qt;
+Keywords=search;find;file;everything;поиск;файл;
+StartupNotify=true

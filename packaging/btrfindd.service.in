@@ -1,0 +1,31 @@
+[Unit]
+Description=btrfind — индекс файлов btrfs для мгновенного поиска
+Documentation=file://@CMAKE_INSTALL_FULL_DATADIR@/doc/btrfind/README.md
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_SBINDIR@/btrfindd --socket /run/btrfind/btrfind.sock --state-dir /var/lib/btrfind
+RuntimeDirectory=btrfind
+RuntimeDirectoryMode=0755
+StateDirectory=btrfind
+StateDirectoryMode=0700
+# Индексация не должна мешать работе
+Nice=10
+IOSchedulingClass=idle
+# Нужны: чтение дерева btrfs и fanotify на всю ФС (CAP_SYS_ADMIN), open_by_handle_at
+# (CAP_DAC_READ_SEARCH), обход любых каталогов (CAP_DAC_OVERRIDE).
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/btrfind /run/btrfind
+PrivateTmp=no
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
