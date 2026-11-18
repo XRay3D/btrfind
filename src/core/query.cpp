@@ -2,6 +2,9 @@
 
 #include "fold.h"
 
+#include <grp.h>
+#include <pwd.h>
+
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -264,11 +267,39 @@ Query parse_query(std::string_view text, const QueryOptions& opts, time_t now) {
                 push(t);
                 continue;
             }
-            if (pfx == "dm" || pfx == "datemodified") {
-                t.kind = Term::Date;
+            if (pfx == "dm" || pfx == "datemodified" || pfx == "dc" || pfx == "datecreated") {
+                t.kind = (pfx == "dm" || pfx == "datemodified") ? Term::Date : Term::Created;
                 if (!parse_date_filter(val, now, t.tmin, t.tmax)) {
-                    q.error = "dm: — не понял «" + val + "» (примеры: today, 2026-01-01, >2026-01-01)";
+                    q.error = pfx + ": — не понял «" + val + "» (примеры: today, 2026-01-01, >2026-01-01)";
                     return q;
+                }
+                push(t);
+                continue;
+            }
+            if (pfx == "owner" || pfx == "user" || pfx == "group") {
+                const bool grp = pfx == "group";
+                t.kind = grp ? Term::Gid : Term::Uid;
+                char* end = nullptr;
+                const unsigned long id = strtoul(val.c_str(), &end, 10);
+                if (!val.empty() && end && *end == 0) {
+                    t.min = id;
+                } else {
+                    char buf[4096];
+                    if (grp) {
+                        group g{}, *r = nullptr;
+                        if (getgrnam_r(val.c_str(), &g, buf, sizeof buf, &r) != 0 || !r) {
+                            q.error = "group: — нет группы «" + val + "»";
+                            return q;
+                        }
+                        t.min = r->gr_gid;
+                    } else {
+                        passwd p{}, *r = nullptr;
+                        if (getpwnam_r(val.c_str(), &p, buf, sizeof buf, &r) != 0 || !r) {
+                            q.error = pfx + ": — нет пользователя «" + val + "»";
+                            return q;
+                        }
+                        t.min = r->pw_uid;
+                    }
                 }
                 push(t);
                 continue;

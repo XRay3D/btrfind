@@ -55,6 +55,13 @@ void Client::requestRows(qint64 id, qint64 from, qint64 count) {
                   {QStringLiteral("count"), count}});
 }
 
+void Client::requestSum(qint64 id, const QCborArray& ranges, qint64 tag) {
+    send(QCborMap{{QStringLiteral("op"), QStringLiteral("sum")},
+                  {QStringLiteral("id"), id},
+                  {QStringLiteral("tag"), tag},
+                  {QStringLiteral("ranges"), ranges}});
+}
+
 void Client::requestStatus() { send(QCborMap{{QStringLiteral("op"), QStringLiteral("status")}}); }
 
 void Client::on_ready_read() {
@@ -66,7 +73,10 @@ void Client::on_ready_read() {
         const QString op = m.value("op").toString();
         if (op == "result")
             emit result(m.value("id").toInteger(), m.value("total").toInteger(), m.value("ms").toDouble(),
-                        m.value("error").toString());
+                        m.value("error").toString(), m);
+        else if (op == "sum")
+            emit sum(m.value("id").toInteger(), m.value("tag").toInteger(), m.value("bytes").toInteger(),
+                     m.value("files").toInteger(), m.value("dirs").toInteger());
         else if (op == "rows")
             emit rows(m.value("id").toInteger(), m.value("from").toInteger(), m.value("rows").toArray());
         else if (op == "status")

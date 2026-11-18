@@ -2,8 +2,11 @@
 
 #include "renamedialog.h"
 #include "resultmodel.h"
+#include "thumbdelegate.h"
+#include "thumbnails.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -17,17 +20,22 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QLocale>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTableView>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 namespace bx {
 namespace {
@@ -48,17 +56,31 @@ const Preset kPresets[] = {
     {"Исходники", "ext:c;h;cpp;hpp;cc;cxx;qml;py;rs;go;js;ts;java;kt;cs;sh;cmake;json;xml;yaml;yml;toml"},
 };
 
+constexpr int kTileSizes[] = {64, 96, 128, 192, 256};
+constexpr int kModes = 1 + int(std::size(kTileSizes));
+const char* kModeTitles[] = {"Таблица", "Эскизы: мелкие", "Эскизы: средние", "Эскизы: крупные",
+                             "Эскизы: очень крупные", "Эскизы: огромные"};
+const char* kHeaderKey = "header3";  // состояние заголовка (новый набор столбцов)
+
 QString human_count(qint64 n) {
     if (n >= 1000000) return QLocale().toString(n / 1e6, 'f', 2) + QObject::tr(" млн");
     if (n >= 10000) return QLocale().toString(n / 1000) + QObject::tr(" тыс.");
     return QLocale().toString(n);
 }
 
-QToolButton* toggle(const QString& text, const QString& tip, QWidget* parent) {
+QString size_text(qint64 n) { return QLocale().formattedDataSize(n, 1, QLocale::DataSizeTraditionalFormat); }
+
+QAction* toggle_action(const QString& icon_text, const QString& text, QObject* parent) {
+    auto* a = new QAction(text, parent);
+    a->setIconText(icon_text);
+    a->setToolTip(text);
+    a->setCheckable(true);
+    return a;
+}
+
+QToolButton* toggle_button(QAction* a, QWidget* parent) {
     auto* b = new QToolButton(parent);
-    b->setText(text);
-    b->setToolTip(tip);
-    b->setCheckable(true);
+    b->setDefaultAction(a);
     b->setAutoRaise(true);
     QFont f = b->font();
     f.setBold(true);
@@ -72,17 +94,23 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     setWindowTitle(QStringLiteral("btrfind"));
     setWindowIcon(QIcon::fromTheme(QStringLiteral("system-search")));
     model_ = new ResultModel(c_, this);
+    thumbs_ = new ThumbnailProvider(this);
 
     auto* central = new QWidget(this);
     auto* lay = new QVBoxLayout(central);
     lay->setContentsMargins(6, 6, 6, 0);
     lay->setSpacing(4);
 
+    // --- строка поиска
     auto* top = new QHBoxLayout;
     edit_ = new QLineEdit(central);
     edit_->setPlaceholderText(tr("Поиск файлов и папок…  (*.pdf, ext:docx, size:>10mb, dm:today, regex:…)"));
     edit_->setClearButtonEnabled(true);
     edit_->installEventFilter(this);
+    QIcon histIcon = QIcon::fromTheme(QStringLiteral("document-open-recent"), QIcon::fromTheme(QStringLiteral("view-history")));
+    QAction* histBtn = edit_->addAction(histIcon, QLineEdit::TrailingPosition);
+    histBtn->setToolTip(tr("История поиска (Ctrl+H)"));
+    connect(histBtn, &QAction::triggered, this, &MainWindow::showHistoryPopup);
     folderChip_ = new QToolButton(central);
     folderChip_->setIcon(QIcon::fromTheme(QStringLiteral("folder")));
     folderChip_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -90,20 +118,20 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     folderChip_->setToolTip(tr("Поиск только в этой папке — нажмите, чтобы искать везде"));
     folderChip_->hide();
     connect(folderChip_, &QToolButton::clicked, this, [this] { setFolder({}); });
-    case_ = toggle(QStringLiteral("Aa"), tr("С учётом регистра"), central);
-    regex_ = toggle(QStringLiteral(".*"), tr("Регулярное выражение (весь запрос, PCRE2)"), central);
-    path_ = toggle(QStringLiteral("/"), tr("Искать по полному пути, а не только по имени"), central);
+    aCase_ = toggle_action(QStringLiteral("Aa"), tr("С учётом регистра"), this);
+    aRegex_ = toggle_action(QStringLiteral(".*"), tr("Регулярное выражение (весь запрос, PCRE2)"), this);
+    aPath_ = toggle_action(QStringLiteral("/"), tr("Искать по полному пути"), this);
     filter_ = new QComboBox(central);
     for (const Preset& p : kPresets) filter_->addItem(tr(p.title), QString::fromUtf8(p.filter));
     top->addWidget(folderChip_);
     top->addWidget(edit_, 1);
-    top->addWidget(case_);
-    top->addWidget(regex_);
-    top->addWidget(path_);
+    for (QAction* a : {aCase_, aRegex_, aPath_}) top->addWidget(toggle_button(a, central));
     top->addWidget(filter_);
     lay->addLayout(top);
 
-    view_ = new QTableView(central);
+    // --- таблица
+    stack_ = new QStackedWidget(central);
+    view_ = new QTableView(stack_);
     view_->setModel(model_);
     view_->setSelectionBehavior(QAbstractItemView::SelectRows);
     view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -116,17 +144,50 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     view_->setTextElideMode(Qt::ElideMiddle);
     view_->verticalHeader()->hide();
     view_->verticalHeader()->setDefaultSectionSize(view_->fontMetrics().height() + 6);
-    view_->horizontalHeader()->setStretchLastSection(false);
-    view_->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    view_->horizontalHeader()->setHighlightSections(false);
-    view_->setColumnWidth(ResultModel::Name, 320);
-    view_->setColumnWidth(ResultModel::Path, 480);
-    view_->setColumnWidth(ResultModel::Size, 90);
-    view_->setColumnWidth(ResultModel::Modified, 130);
+    QHeaderView* hh = view_->horizontalHeader();
+    hh->setStretchLastSection(false);
+    hh->setSectionResizeMode(QHeaderView::Interactive);
+    hh->setHighlightSections(false);
+    hh->setSectionsMovable(true);
+    hh->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(hh, &QHeaderView::customContextMenuRequested, this, [this, hh](const QPoint& pos) {
+        QMenu m(this);
+        fillColumnsMenu(&m);
+        m.exec(hh->mapToGlobal(pos));
+    });
+    const int widths[ResultModel::ColumnCount] = {320, 480, 90, 130, 130, 80, 180, 100, 100, 100, 130, 90, 600};
+    for (int c = 0; c < ResultModel::ColumnCount; ++c) view_->setColumnWidth(c, widths[c]);
     view_->setSortingEnabled(true);
-    view_->horizontalHeader()->setSortIndicator(ResultModel::Name, Qt::AscendingOrder);
+    hh->setSortIndicator(ResultModel::Name, Qt::AscendingOrder);
     view_->installEventFilter(this);
-    lay->addWidget(view_, 1);
+    view_->viewport()->installEventFilter(this);
+    stack_->addWidget(view_);
+
+    // --- плитка эскизов: та же модель и то же выделение, порядок как в таблице
+    grid_ = new QListView(stack_);
+    grid_->setModel(model_);
+    grid_->setSelectionModel(view_->selectionModel());
+    grid_->setModelColumn(ResultModel::Name);
+    grid_->setViewMode(QListView::ListMode);  // ListMode + перенос: дешёвая раскладка и на миллион элементов
+    grid_->setFlow(QListView::LeftToRight);
+    grid_->setWrapping(true);
+    grid_->setResizeMode(QListView::Adjust);
+    grid_->setUniformItemSizes(true);
+    grid_->setMovement(QListView::Static);
+    grid_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    grid_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    grid_->setSelectionRectVisible(true);
+    grid_->setDragEnabled(true);
+    grid_->setDragDropMode(QAbstractItemView::DragOnly);
+    grid_->setContextMenuPolicy(Qt::CustomContextMenu);
+    grid_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tdel_ = new ThumbDelegate(thumbs_, grid_);
+    grid_->setItemDelegate(tdel_);
+    grid_->installEventFilter(this);
+    grid_->viewport()->installEventFilter(this);
+    stack_->addWidget(grid_);
+    connect(thumbs_, &ThumbnailProvider::updated, grid_->viewport(), qOverload<>(&QWidget::update));
+    lay->addWidget(stack_, 1);
     setCentralWidget(central);
 
     count_ = new QLabel(this);
@@ -134,40 +195,54 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     statusBar()->addWidget(count_, 1);
     statusBar()->addPermanentWidget(daemon_);
 
-    // Действия с горячими клавишами (работают и из контекстного меню)
-    auto act = [this](const QString& text, const QString& icon, const QKeySequence& ks, auto fn) {
-        auto* a = new QAction(QIcon::fromTheme(icon), text, this);
-        if (!ks.isEmpty()) a->setShortcut(ks);
-        a->setShortcutContext(Qt::WindowShortcut);
-        connect(a, &QAction::triggered, this, fn);
-        addAction(a);
-        return a;
-    };
-    act(tr("Найти"), {}, QKeySequence::Find, [this] { edit_->setFocus(); edit_->selectAll(); });
-    act(tr("Обновить"), {}, QKeySequence::Refresh, [this] { runSearch(); });
-    act(tr("Выход"), {}, QKeySequence::Quit, [this] { close(); });
-    act(tr("Переименовать…"), {}, QKeySequence(Qt::Key_F2), [this] { renameSelected(); });
-    // В строке поиска Ctrl+Z отменяет ввод (QLineEdit перехватывает сочетание сам).
-    act(tr("Отменить переименование"), {}, QKeySequence::Undo, [this] { undoRename(); });
+    buildMenus();
 
-    // Поиск при вводе
+    // --- поиск при вводе, история
     debounce_.setSingleShot(true);
     debounce_.setInterval(30);
     connect(&debounce_, &QTimer::timeout, this, [this] { runSearch(); });
     connect(edit_, &QLineEdit::textChanged, &debounce_, qOverload<>(&QTimer::start));
-    for (QToolButton* b : {case_, regex_, path_}) connect(b, &QToolButton::toggled, this, [this] { runSearch(); });
+    historyTimer_.setSingleShot(true);
+    historyTimer_.setInterval(3000);  // запрос «устоялся» — в историю
+    connect(&historyTimer_, &QTimer::timeout, this, [this] {
+        if (total_ > 0) commitHistory();
+    });
+    connect(edit_, &QLineEdit::textChanged, &historyTimer_, qOverload<>(&QTimer::start));
+    for (QAction* a : {aCase_, aRegex_, aPath_}) connect(a, &QAction::toggled, this, [this] { runSearch(); });
     connect(filter_, &QComboBox::currentIndexChanged, this, [this] { runSearch(); });
-    connect(model_, &ResultModel::sortRequested, this, [this](const QString& key, bool desc) {
+
+    // --- сортировка (демон); для столбцов без сортировки вернуть прежний индикатор
+    connect(model_, &ResultModel::sortRequested, this, [this, hh](const QString& key, bool desc) {
         sort_ = key;
         desc_ = desc;
+        sortCol_ = hh->sortIndicatorSection();
+        sortDescCol_ = desc;
         runSearch();
     });
-    connect(view_, &QTableView::doubleClicked, this, [this] { openSelected(); });
-    connect(view_, &QTableView::customContextMenuRequested, this, &MainWindow::showContextMenu);
+    connect(model_, &ResultModel::sortUnavailable, this, [this, hh](int column) {
+        const QSignalBlocker b(hh);
+        hh->setSortIndicator(sortCol_, sortDescCol_ ? Qt::DescendingOrder : Qt::AscendingOrder);
+        statusBar()->showMessage(
+            tr("По столбцу «%1» сортировка недоступна: он читается с диска только для видимых строк")
+                .arg(ResultModel::columnTitle(column)),
+            5000);
+    });
 
-    // Связь с демоном
+    for (QAbstractItemView* v : {static_cast<QAbstractItemView*>(view_), static_cast<QAbstractItemView*>(grid_)}) {
+        connect(v, &QAbstractItemView::doubleClicked, this, [this] { openSelected(); });
+        connect(v, &QWidget::customContextMenuRequested, this, [this, v](const QPoint& pos) { showContextMenu(v, pos); });
+    }
+
+    // --- связь с демоном
     connect(c_, &Client::result, this, &MainWindow::onResult);
     connect(c_, &Client::status, this, &MainWindow::onStatus);
+    connect(c_, &Client::sum, this, [this](qint64 id, qint64 tag, qint64 bytes, qint64 files, qint64 dirs) {
+        if (id != model_->resultId() || tag != sumTag_) return;
+        selBytes_ = bytes;
+        selFiles_ = files;
+        selDirs_ = dirs;
+        updateCountLabel();
+    });
     // Индекс изменился — тихо обновить результат, не чаще раза в секунду.
     refreshTimer_.setSingleShot(true);
     refreshTimer_.setInterval(1000);
@@ -175,8 +250,12 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     connect(c_, &Client::changed, this, [this] {
         if (!refreshTimer_.isActive()) refreshTimer_.start();
     });
-    // Выделение следует за файлами при обновлениях результата.
+    // Выделение следует за файлами при обновлениях результата; размер выделенного — от демона.
+    sumTimer_.setSingleShot(true);
+    sumTimer_.setInterval(120);
+    connect(&sumTimer_, &QTimer::timeout, this, &MainWindow::requestSelectionSum);
     connect(view_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
+        sumTimer_.start();
         if (restoring_) return;
         if (view_->selectionModel()->selectedRows().size() > 5000) {  // Ctrl+A на огромном результате
             selPaths_.clear();
@@ -202,30 +281,204 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     connect(&statusTimer_, &QTimer::timeout, c_, &Client::requestStatus);
     statusTimer_.start();
 
+    // --- настройки
     QSettings s;
     restoreGeometry(s.value(QStringLiteral("geometry")).toByteArray());
-    view_->horizontalHeader()->restoreState(s.value(QStringLiteral("header")).toByteArray());
-    case_->setChecked(s.value(QStringLiteral("case")).toBool());
-    regex_->setChecked(s.value(QStringLiteral("regex")).toBool());
-    path_->setChecked(s.value(QStringLiteral("path")).toBool());
+    if (!hh->restoreState(s.value(QLatin1String(kHeaderKey)).toByteArray()))
+        for (int c = ResultModel::Created; c < ResultModel::ColumnCount; ++c) hh->setSectionHidden(c, true);
+    aCase_->setChecked(s.value(QStringLiteral("case")).toBool());
+    aRegex_->setChecked(s.value(QStringLiteral("regex")).toBool());
+    aPath_->setChecked(s.value(QStringLiteral("path")).toBool());
     filter_->setCurrentIndex(s.value(QStringLiteral("filter")).toInt());
     if (!s.contains(QStringLiteral("geometry"))) resize(1100, 700);
-    const auto order = view_->horizontalHeader()->sortIndicatorOrder();
-    model_->sort(view_->horizontalHeader()->sortIndicatorSection(), order);
+    setViewMode(s.value(QStringLiteral("view/mode"), 0).toInt());
+    sortCol_ = hh->sortIndicatorSection();
+    sortDescCol_ = hh->sortIndicatorOrder() == Qt::DescendingOrder;
+    if (!ResultModel::sortable(sortCol_)) sortCol_ = ResultModel::Name;
+    model_->sort(sortCol_, hh->sortIndicatorOrder());
+}
+
+void MainWindow::buildMenus() {
+    auto add = [this](QMenu* m, const QString& text, const QString& icon, const QKeySequence& ks, auto fn,
+                      QWidget* scope = nullptr) {
+        auto* a = new QAction(QIcon::fromTheme(icon), text, this);
+        if (!ks.isEmpty()) a->setShortcut(ks);
+        if (scope) {  // сочетание только в области результатов (в строке поиска — своё: Ctrl+C, Ctrl+Z…)
+            a->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+            scope->addAction(a);
+        } else {
+            a->setShortcutContext(Qt::WindowShortcut);
+            addAction(a);
+        }
+        connect(a, &QAction::triggered, this, fn);
+        m->addAction(a);
+        return a;
+    };
+
+    QMenu* file = menuBar()->addMenu(tr("&Файл"));
+    add(file, tr("Открыть"), QStringLiteral("document-open"), {}, [this] { openSelected(); });
+    add(file, tr("Показать в папке"), QStringLiteral("folder-open"), {}, [this] { openFolders(); });
+    file->addSeparator();
+    add(file, tr("Выход"), QStringLiteral("application-exit"), QKeySequence::Quit, [this] { close(); });
+
+    QMenu* edit = menuBar()->addMenu(tr("&Правка"));
+    add(edit, tr("Копировать"), QStringLiteral("edit-copy"), QKeySequence::Copy, [this] { copyFiles(); }, stack_);
+    add(edit, tr("Копировать полный путь"), QStringLiteral("edit-copy-path"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C),
+        [this] { copyPaths(); }, stack_);
+    add(edit, tr("Копировать имя"), {}, {}, [this] { copyNames(); });
+    edit->addSeparator();
+    add(edit, tr("Переименовать…"), QStringLiteral("edit-rename"), QKeySequence(Qt::Key_F2), [this] { renameSelected(); });
+    add(edit, tr("Отменить переименование"), QStringLiteral("edit-undo"), QKeySequence::Undo, [this] { undoRename(); },
+        stack_);
+    edit->addSeparator();
+    add(edit, tr("Выделить всё"), QStringLiteral("edit-select-all"), QKeySequence::SelectAll,
+        [this] { currentView()->selectAll(); }, stack_);
+
+    QMenu* view = menuBar()->addMenu(tr("&Вид"));
+    viewGroup_ = new QActionGroup(this);
+    for (int m = 0; m < kModes; ++m) {
+        QAction* a = add(view, tr(kModeTitles[m]), m == 0 ? QStringLiteral("view-list-details") : QStringLiteral("view-preview"),
+                         QKeySequence(Qt::CTRL | (Qt::Key_1 + m)), [this, m] { setViewMode(m); });
+        a->setCheckable(true);
+        viewGroup_->addAction(a);
+        viewActs_ << a;
+    }
+    view->addSeparator();
+    QMenu* cols = view->addMenu(tr("Столбцы"));
+    connect(cols, &QMenu::aboutToShow, this, [this, cols] { fillColumnsMenu(cols); });
+    QMenu* sort = view->addMenu(tr("Сортировка"));
+    connect(sort, &QMenu::aboutToShow, this, [this, sort] { fillSortMenu(sort); });
+    view->addSeparator();
+    add(view, tr("Обновить"), QStringLiteral("view-refresh"), QKeySequence::Refresh, [this] { runSearch(); });
+    QAction* hint = view->addAction(tr("Ctrl+колесо мыши — таблица ↔ эскизы"));
+    hint->setEnabled(false);
+
+    QMenu* search = menuBar()->addMenu(tr("&Поиск"));
+    add(search, tr("Найти"), QStringLiteral("edit-find"), QKeySequence::Find, [this] {
+        edit_->setFocus();
+        edit_->selectAll();
+    });
+    add(search, tr("История поиска…"), QStringLiteral("document-open-recent"), QKeySequence(Qt::CTRL | Qt::Key_H),
+        [this] { showHistoryPopup(); });
+    QMenu* hist = search->addMenu(tr("Недавние запросы"));
+    connect(hist, &QMenu::aboutToShow, this, [this, hist] { fillHistoryMenu(hist); });
+    search->addSeparator();
+    search->addAction(aCase_);
+    search->addAction(aRegex_);
+    search->addAction(aPath_);
+    search->addSeparator();
+    add(search, tr("Очистить историю"), QStringLiteral("edit-clear-history"), {}, [this] {
+        history_.clear();
+        statusBar()->showMessage(tr("История поиска очищена"), 3000);
+    });
+    aNoHistory_ = add(search, tr("Не сохранять историю"), {}, {}, [this] { history_.setEnabled(!aNoHistory_->isChecked()); });
+    aNoHistory_->setCheckable(true);
+    aNoHistory_->setChecked(!history_.enabled());
 }
 
 void MainWindow::closeEvent(QCloseEvent* e) {
     QSettings s;
     s.setValue(QStringLiteral("geometry"), saveGeometry());
-    s.setValue(QStringLiteral("header"), view_->horizontalHeader()->saveState());
-    s.setValue(QStringLiteral("case"), case_->isChecked());
-    s.setValue(QStringLiteral("regex"), regex_->isChecked());
-    s.setValue(QStringLiteral("path"), path_->isChecked());
+    s.setValue(QLatin1String(kHeaderKey), view_->horizontalHeader()->saveState());
+    s.setValue(QStringLiteral("case"), aCase_->isChecked());
+    s.setValue(QStringLiteral("regex"), aRegex_->isChecked());
+    s.setValue(QStringLiteral("path"), aPath_->isChecked());
     s.setValue(QStringLiteral("filter"), filter_->currentIndex());
+    s.setValue(QStringLiteral("view/mode"), viewMode_);
+    commitHistory();
     e->accept();
 }
 
+QAbstractItemView* MainWindow::currentView() const {
+    return viewMode_ > 0 ? static_cast<QAbstractItemView*>(grid_) : static_cast<QAbstractItemView*>(view_);
+}
+
+void MainWindow::setViewMode(int mode) {
+    mode = std::clamp(mode, 0, kModes - 1);
+    if (mode == viewMode_) return;
+    const bool hadFocus = currentView()->hasFocus();
+    const QModelIndex cur = view_->selectionModel()->currentIndex();
+    viewMode_ = mode;
+    if (mode == 0) {
+        stack_->setCurrentWidget(view_);
+    } else {
+        const int s = kTileSizes[mode - 1];
+        tdel_->setTileSize(s);
+        thumbs_->cancelPending();
+        grid_->setIconSize(QSize(s, s));
+        const QSize cell = tdel_->cellSize(grid_->fontMetrics());
+        grid_->setGridSize(cell);
+        grid_->verticalScrollBar()->setSingleStep(cell.height() / 3);
+        stack_->setCurrentWidget(grid_);
+        grid_->doItemsLayout();
+    }
+    viewActs_[mode]->setChecked(true);
+    QAbstractItemView* v = currentView();
+    if (cur.isValid()) v->scrollTo(cur.siblingAtColumn(0), QAbstractItemView::PositionAtCenter);
+    if (hadFocus) v->setFocus();
+}
+
+void MainWindow::fillColumnsMenu(QMenu* m) {
+    m->clear();
+    QHeaderView* hh = view_->horizontalHeader();
+    for (int c = 0; c < ResultModel::ColumnCount; ++c) {
+        QString title = ResultModel::columnTitle(c);
+        if (!ResultModel::sortable(c)) title += tr(" (без сортировки)");
+        QAction* a = m->addAction(title);
+        a->setCheckable(true);
+        a->setChecked(!hh->isSectionHidden(c));
+        a->setEnabled(c != ResultModel::Name);  // имя показывается всегда
+        connect(a, &QAction::toggled, this, [this, hh, c](bool on) {
+            hh->setSectionHidden(c, !on);
+            if (on && hh->sectionSize(c) < 40) hh->resizeSection(c, 120);
+            if (on) model_->dataChanged(model_->index(0, c), model_->index(std::max(0, model_->rowCount() - 1), c));
+        });
+    }
+    m->addSeparator();
+    m->addAction(tr("По умолчанию"), this, [hh] {
+        for (int c = 0; c < ResultModel::ColumnCount; ++c) hh->setSectionHidden(c, c >= ResultModel::Created);
+    });
+}
+
+void MainWindow::fillSortMenu(QMenu* m) {
+    m->clear();
+    QHeaderView* hh = view_->horizontalHeader();
+    auto* g = new QActionGroup(m);
+    for (int c = 0; c < ResultModel::ColumnCount; ++c) {
+        if (!ResultModel::sortable(c) || c == ResultModel::FullPath || c == ResultModel::Extension) continue;
+        QAction* a = m->addAction(ResultModel::columnTitle(c));
+        a->setCheckable(true);
+        a->setChecked(sortCol_ == c || (c == ResultModel::Path && sortCol_ == ResultModel::FullPath) ||
+                      (c == ResultModel::Type && sortCol_ == ResultModel::Extension));
+        g->addAction(a);
+        connect(a, &QAction::triggered, this, [this, hh, c] { hh->setSortIndicator(c, hh->sortIndicatorOrder()); });
+    }
+    m->addSeparator();
+    QAction* d = m->addAction(tr("По убыванию"));
+    d->setCheckable(true);
+    d->setChecked(sortDescCol_);
+    connect(d, &QAction::toggled, this,
+            [hh](bool on) { hh->setSortIndicator(hh->sortIndicatorSection(), on ? Qt::DescendingOrder : Qt::AscendingOrder); });
+}
+
 bool MainWindow::eventFilter(QObject* o, QEvent* e) {
+    // Ctrl+колесо: таблица -> эскизы всё крупнее и обратно
+    if (e->type() == QEvent::Wheel && (o == view_->viewport() || o == grid_->viewport())) {
+        auto* we = static_cast<QWheelEvent*>(e);
+        if (we->modifiers() & Qt::ControlModifier) {
+            wheelAcc_ += we->angleDelta().y();
+            while (wheelAcc_ >= 120) {
+                wheelAcc_ -= 120;
+                setViewMode(viewMode_ + 1);
+            }
+            while (wheelAcc_ <= -120) {
+                wheelAcc_ += 120;
+                setViewMode(viewMode_ - 1);
+            }
+            return true;
+        }
+        return QMainWindow::eventFilter(o, e);
+    }
     if (e->type() != QEvent::KeyPress) return QMainWindow::eventFilter(o, e);
     auto* k = static_cast<QKeyEvent*>(e);
     if (o == edit_) {
@@ -233,19 +486,22 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
             edit_->clear();
             return true;
         }
-        if ((k->key() == Qt::Key_Down || k->key() == Qt::Key_PageDown) && model_->rowCount() > 0) {
-            view_->setFocus();
-            view_->selectRow(0);
+        if (k->key() == Qt::Key_Down && (k->modifiers() & Qt::AltModifier)) {
+            showHistoryPopup();
             return true;
         }
-        if (k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) {
+        if ((k->key() == Qt::Key_Down || k->key() == Qt::Key_PageDown || k->key() == Qt::Key_Return ||
+             k->key() == Qt::Key_Enter)) {
+            if (k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) commitHistory();
             if (model_->rowCount() > 0) {
-                view_->setFocus();
-                view_->selectRow(0);
+                QAbstractItemView* v = currentView();
+                v->setFocus();
+                v->selectionModel()->setCurrentIndex(model_->index(0, 0), QItemSelectionModel::ClearAndSelect |
+                                                                              QItemSelectionModel::Rows);
             }
             return true;
         }
-    } else if (o == view_) {
+    } else if (o == view_ || o == grid_) {
         const bool ctrl = k->modifiers() & Qt::ControlModifier, shift = k->modifiers() & Qt::ShiftModifier;
         if (k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) {
             ctrl ? openFolders() : openSelected();
@@ -255,7 +511,7 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
             shift ? copyPaths() : copyFiles();
             return true;
         }
-        if (k->key() == Qt::Key_Up && view_->currentIndex().row() <= 0) {
+        if (o == view_ && k->key() == Qt::Key_Up && view_->currentIndex().row() <= 0) {
             edit_->setFocus();
             return true;
         }
@@ -305,19 +561,20 @@ void MainWindow::runSearch(bool refresh) {
     if (!c_->isConnected()) return;
     SearchOpts o;
     o.filter = filterText();
-    o.case_sensitive = case_->isChecked();
-    o.regex = regex_->isChecked();
-    o.path = path_->isChecked();
+    o.case_sensitive = aCase_->isChecked();
+    o.regex = aRegex_->isChecked();
+    o.path = aPath_->isChecked();
     o.sort = sort_;
     o.desc = desc_;
     refresh_ = refresh;
     pendingId_ = c_->search(edit_->text(), o);
 }
 
-void MainWindow::onResult(qint64 id, qint64 total, double ms, const QString& error) {
+void MainWindow::onResult(qint64 id, qint64 total, double ms, const QString& error, const QCborMap& m) {
     if (id != pendingId_) return;  // устаревший ответ
+    error_ = error;
     if (!error.isEmpty()) {
-        count_->setText(QStringLiteral("<span style='color:#d33'>%1</span>").arg(error.toHtmlEscaped()));
+        updateCountLabel();
         return;
     }
     if (refresh_ && model_->resultId() >= 0) {
@@ -325,10 +582,63 @@ void MainWindow::onResult(qint64 id, qint64 total, double ms, const QString& err
     } else {
         selPaths_.clear();
         curPath_.clear();
+        thumbs_->cancelPending();
         model_->setResult(id, total);
         view_->scrollToTop();
+        grid_->scrollToTop();
     }
-    count_->setText(tr("%1 объектов · %2 мс").arg(QLocale().toString(total)).arg(ms, 0, 'f', 1));
+    total_ = total;
+    ms_ = ms;
+    totalBytes_ = m.value("bytes").toInteger(-1);  // -1 — старый демон без итогов
+    totalFiles_ = m.value("files").toInteger();
+    totalDirs_ = m.value("dirs").toInteger();
+    requestSelectionSum();
+}
+
+void MainWindow::requestSelectionSum() {
+    // Диапазоны выделенных строк -> демон считает размер (строки могут быть не загружены).
+    const QItemSelection sel = view_->selectionModel()->selection();
+    QList<QPair<int, int>> ranges;
+    for (const QItemSelectionRange& r : sel) ranges.append({r.top(), r.bottom() + 1});
+    std::sort(ranges.begin(), ranges.end());
+    QCborArray merged;
+    qint64 count = 0;
+    for (qsizetype i = 0; i < ranges.size();) {
+        int a = ranges[i].first, b = ranges[i].second;
+        for (++i; i < ranges.size() && ranges[i].first <= b; ++i) b = std::max(b, ranges[i].second);
+        merged.append(QCborArray{a, b});
+        count += b - a;
+    }
+    selCount_ = count;
+    selBytes_ = -1;
+    if (count > 0 && count == total_) {  // выделено всё
+        selBytes_ = totalBytes_;
+        selFiles_ = totalFiles_;
+        selDirs_ = totalDirs_;
+    } else if (count > 0) {
+        c_->requestSum(model_->resultId(), merged, ++sumTag_);
+    }
+    updateCountLabel();
+}
+
+void MainWindow::updateCountLabel() {
+    if (!error_.isEmpty()) {
+        count_->setText(QStringLiteral("<span style='color:#d33'>%1</span>").arg(error_.toHtmlEscaped()));
+        return;
+    }
+    QString t = tr("%1 объектов").arg(QLocale().toString(total_));
+    if (totalBytes_ >= 0) {
+        t += tr(" (файлов %1, папок %2) · %3")
+                 .arg(QLocale().toString(totalFiles_), QLocale().toString(totalDirs_), size_text(totalBytes_));
+    }
+    t += tr(" · %1 мс").arg(ms_, 0, 'f', 1);
+    if (selCount_ > 0) {
+        QString s = tr("Выделено: %1").arg(QLocale().toString(selCount_));
+        if (selBytes_ >= 0) s += tr(" · %1").arg(size_text(selBytes_));
+        if (selBytes_ >= 0 && selDirs_ > 0) s += tr(" (папок %1 — размер без содержимого)").arg(selDirs_);
+        t = QStringLiteral("<b>%1</b> — %2").arg(s.toHtmlEscaped(), t.toHtmlEscaped());
+    }
+    count_->setText(t);
 }
 
 void MainWindow::onStatus(const QCborMap& m) {
@@ -379,6 +689,45 @@ void MainWindow::restoreSelection(int first, int last) {
     restoring_ = false;
 }
 
+// ---------------------------------------------------------------- история
+
+void MainWindow::commitHistory() {
+    historyTimer_.stop();
+    history_.add(edit_->text());
+}
+
+void MainWindow::fillHistoryMenu(QMenu* m) {
+    m->clear();
+    const QStringList& items = history_.items();
+    if (items.isEmpty()) {
+        m->addAction(history_.enabled() ? tr("История пуста") : tr("История отключена"))->setEnabled(false);
+        return;
+    }
+    const QFontMetrics fm(m->font());
+    for (const QString& q : items.mid(0, 30)) {
+        QAction* a = m->addAction(fm.elidedText(q, Qt::ElideMiddle, 500));
+        a->setToolTip(q);
+        connect(a, &QAction::triggered, this, [this, q] {
+            setQuery(q);
+            commitHistory();  // наверх списка
+            edit_->setFocus();
+            edit_->selectAll();
+        });
+    }
+    m->addSeparator();
+    m->addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), tr("Очистить историю"), this,
+                 [this] { history_.clear(); });
+}
+
+void MainWindow::showHistoryPopup() {
+    QMenu m(this);
+    fillHistoryMenu(&m);
+    m.setMinimumWidth(edit_->width());
+    m.exec(edit_->mapToGlobal(QPoint(0, edit_->height())));
+}
+
+// ---------------------------------------------------------------- переименование
+
 void MainWindow::renameSelected() {
     const QModelIndexList rows = view_->selectionModel()->selectedRows();
     if (rows.isEmpty()) return;
@@ -387,6 +736,7 @@ void MainWindow::renameSelected() {
         statusBar()->showMessage(tr("Не все выделенные строки загружены — прокрутите к ним или выделите меньше"), 6000);
         return;
     }
+    commitHistory();
     RenameResult r;
     if (paths.size() == 1) {
         const bool isdir = rows[0].siblingAtColumn(0).data(ResultModel::IsDirRole).toBool();
@@ -441,6 +791,8 @@ void MainWindow::applyRenamed(const std::vector<RenameDone>& done) {
     if (!refreshTimer_.isActive()) refreshTimer_.start();  // демон пришлёт «changed», но обновим и сами
 }
 
+// ---------------------------------------------------------------- действия с результатами
+
 QStringList MainWindow::selectedPaths() const {
     QStringList out;
     for (const QModelIndex& i : view_->selectionModel()->selectedRows()) {
@@ -451,11 +803,13 @@ QStringList MainWindow::selectedPaths() const {
 }
 
 void MainWindow::openSelected() {
+    commitHistory();
     const QStringList ps = selectedPaths();
     for (const QString& p : ps.mid(0, 20)) QDesktopServices::openUrl(QUrl::fromLocalFile(p));
 }
 
 void MainWindow::openFolders() {
+    commitHistory();
     const QStringList ps = selectedPaths();
     if (ps.isEmpty()) return;
     // Файловый менеджер с выделением файла (Dolphin, Nautilus и др. поддерживают FileManager1).
@@ -471,15 +825,20 @@ void MainWindow::openFolders() {
         for (const QString& p : ps.mid(0, 20)) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(p).path()));
 }
 
-void MainWindow::copyPaths() { QApplication::clipboard()->setText(selectedPaths().join(QLatin1Char('\n'))); }
+void MainWindow::copyPaths() {
+    commitHistory();
+    QApplication::clipboard()->setText(selectedPaths().join(QLatin1Char('\n')));
+}
 
 void MainWindow::copyNames() {
+    commitHistory();
     QStringList names;
     for (const QString& p : selectedPaths()) names << QFileInfo(p).fileName();
     QApplication::clipboard()->setText(names.join(QLatin1Char('\n')));
 }
 
 void MainWindow::copyFiles() {  // как в файловом менеджере: вставляется копия файлов
+    commitHistory();
     auto* md = new QMimeData;
     QList<QUrl> urls;
     for (const QString& p : selectedPaths()) urls << QUrl::fromLocalFile(p);
@@ -488,10 +847,12 @@ void MainWindow::copyFiles() {  // как в файловом менеджере
     QApplication::clipboard()->setMimeData(md);
 }
 
-void MainWindow::showContextMenu(const QPoint& pos) {
-    const QModelIndex idx = view_->indexAt(pos);
+void MainWindow::showContextMenu(QAbstractItemView* v, const QPoint& pos) {
+    const QModelIndex idx = v->indexAt(pos);
     if (!idx.isValid()) return;
-    if (!view_->selectionModel()->isRowSelected(idx.row(), {})) view_->selectRow(idx.row());
+    QItemSelectionModel* sm = view_->selectionModel();
+    if (!sm->isRowSelected(idx.row(), {}))
+        sm->setCurrentIndex(idx.siblingAtColumn(0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     const bool isdir = idx.siblingAtColumn(0).data(ResultModel::IsDirRole).toBool();
     const QString dir = idx.siblingAtColumn(0).data(ResultModel::DirRole).toString();
     const QString full = model_->fullPath(idx.row());
@@ -508,7 +869,7 @@ void MainWindow::showContextMenu(const QPoint& pos) {
                 QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C), this, &MainWindow::copyPaths);
     m.addAction(tr("Копировать имя"), this, &MainWindow::copyNames);
     m.addSeparator();
-    const int nsel = int(view_->selectionModel()->selectedRows().size());
+    const int nsel = int(sm->selectedRows().size());
     m.addAction(QIcon::fromTheme(QStringLiteral("edit-rename")),
                 nsel > 1 ? tr("Переименовать %1 объектов…").arg(nsel) : tr("Переименовать…"),
                 QKeySequence(Qt::Key_F2), this, &MainWindow::renameSelected);
@@ -518,7 +879,7 @@ void MainWindow::showContextMenu(const QPoint& pos) {
     m.addSeparator();
     m.addAction(QIcon::fromTheme(QStringLiteral("system-search")), tr("Искать в «%1»").arg(isdir ? full : dir), this,
                 [this, isdir, full, dir] { setFolder(isdir ? full : dir); });
-    m.exec(view_->viewport()->mapToGlobal(pos));
+    m.exec(v->viewport()->mapToGlobal(pos));
 }
 
 }  // namespace bx

@@ -46,12 +46,7 @@ Access peer_access(QLocalSocket* s) {
     return a;
 }
 
-SortKey sort_key(const QString& s) {
-    if (s == "path") return SortKey::Path;
-    if (s == "size") return SortKey::Size;
-    if (s == "mtime") return SortKey::Mtime;
-    return SortKey::Name;
-}
+
 
 }  // namespace
 
@@ -86,6 +81,8 @@ void Session::handle(const QCborMap& m) {
         start_search(m);
     else if (op == "rows")
         send_rows(m);
+    else if (op == "sum")
+        send_sum(m);
     else if (op == "status")
         push(d_.status());
 }
@@ -102,7 +99,7 @@ void Session::start_search(const QCborMap& m) {
     qo.match_path = m.value("path").toBool();
     const std::string text = m.value("q").toString().toStdString();
     const std::string filter = m.value("filter").toString().toStdString();  // доп. условия (пресет GUI)
-    const SortKey key = sort_key(m.value("sort").toString());
+    const SortKey key = sort_key_from(m.value("sort").toString().toStdString());
     const bool desc = m.value("desc").toBool();
     const Access access = access_;
     auto cancel = cancel_;
@@ -141,7 +138,15 @@ void Session::start_search(const QCborMap& m) {
                 reply.insert(QStringLiteral("error"), QString::fromStdString(q.error));
             } else {
                 refs = run_search(q, svs, &access, cancel.get(), nullptr);
-                if (!cancel->load()) sort_results(refs, svs, key, desc);
+                if (!cancel->load()) {
+                    sort_results(refs, svs, key, desc);
+                    std::vector<const Index*> by_vol(d->volumes.size(), nullptr);
+                    for (const auto& sv : svs) by_vol[sv.vol] = sv.ix;
+                    const Totals t = sum_results(refs, by_vol, 0, refs.size());
+                    reply.insert(QStringLiteral("bytes"), qint64(t.bytes));
+                    reply.insert(QStringLiteral("files"), qint64(t.files));
+                    reply.insert(QStringLiteral("dirs"), qint64(t.dirs));
+                }
             }
         }
         if (cancel->load()) return;
@@ -159,6 +164,35 @@ void Session::start_search(const QCborMap& m) {
             },
             Qt::QueuedConnection);
     });
+}
+
+void Session::send_sum(const QCborMap& m) {
+    // Размер выделенного: диапазоны строк последнего результата [from, to).
+    const qint64 id = m.value("id").toInteger();
+    QCborMap reply{{QStringLiteral("op"), QStringLiteral("sum")}, {QStringLiteral("id"), id},
+                   {QStringLiteral("tag"), m.value("tag")}};
+    if (id == result_id_) {
+        std::shared_lock vl(d_.volumes_mu);
+        std::vector<std::shared_lock<std::shared_mutex>> locks;
+        std::vector<const Index*> by_vol(d_.volumes.size(), nullptr);
+        for (auto& v : d_.volumes) {
+            locks.emplace_back(v->mu);
+            if (v->id < epochs_.size() && v->index.epoch == epochs_[v->id]) by_vol[v->id] = &v->index;
+        }
+        Totals t;
+        for (const QCborValue& r : m.value("ranges").toArray()) {
+            const QCborArray a = r.toArray();
+            const Totals p = sum_results(results_, by_vol, size_t(std::max<qint64>(0, a.at(0).toInteger())),
+                                         size_t(std::max<qint64>(0, a.at(1).toInteger())));
+            t.bytes += p.bytes;
+            t.files += p.files;
+            t.dirs += p.dirs;
+        }
+        reply.insert(QStringLiteral("bytes"), qint64(t.bytes));
+        reply.insert(QStringLiteral("files"), qint64(t.files));
+        reply.insert(QStringLiteral("dirs"), qint64(t.dirs));
+    }
+    push(reply);
 }
 
 void Session::send_rows(const QCborMap& m) {
@@ -183,14 +217,15 @@ void Session::send_rows(const QCborMap& m) {
             }
             const Index* ix = v ? &v->index : nullptr;
             if (!ix || ix->epoch != epochs_[vid] || idx >= ix->entries.size()) {
-                rows.append(QCborArray{QString(), QString(), 0, 0, false});  // запись устарела
+                rows.append(QCborArray{QString(), QString(), 0, 0, false, 0, 0, 0, 0});  // запись устарела
                 continue;
             }
             const std::string_view nm = ix->name(idx);
             const Entry& e = ix->entries[idx];
             rows.append(QCborArray{QString::fromUtf8(nm.data(), qsizetype(nm.size())),
                                    QString::fromStdString(ix->dir_path(idx)), qint64(e.size), qint64(e.mtime),
-                                   bool(e.flags & kDir)});
+                                   bool(e.flags & kDir), qint64(e.btime), qint64(e.mode), qint64(e.uid),
+                                   qint64(e.gid)});
         }
     }
     reply.insert(QStringLiteral("rows"), rows);

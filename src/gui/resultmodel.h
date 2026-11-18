@@ -16,8 +16,23 @@ class Client;
 class ResultModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    enum Column { Name, Path, Size, Modified, ColumnCount };
-    enum Role { FullPathRole = Qt::UserRole + 1, IsDirRole, DirRole };
+    enum Column {
+        Name,
+        Path,
+        Size,
+        Modified,
+        Created,
+        Extension,
+        Type,
+        Owner,
+        Group,
+        Permissions,
+        Accessed,  // statx в GUI, без сортировки
+        DiskSize,  // statx в GUI, без сортировки
+        FullPath,
+        ColumnCount
+    };
+    enum Role { FullPathRole = Qt::UserRole + 1, IsDirRole, DirRole, MtimeRole, NameRole };
 
     explicit ResultModel(Client* client, QObject* parent = nullptr);
 
@@ -38,20 +53,28 @@ public:
     void sort(int column, Qt::SortOrder order) override;
 
     QString fullPath(int row) const;
+    static QString columnTitle(int column);
+    static bool sortable(int column);
+    static QString sortKey(int column);  // ключ сортировки демона ("" — нельзя)
 
 signals:
     void sortRequested(const QString& key, bool desc);
+    void sortUnavailable(int column);
     void rowsLoaded(int first, int last);  // строки получены от демона
 
 private:
     struct Row {
         QString name, dir;
-        qint64 size = 0, mtime = 0;
+        qint64 size = 0, mtime = 0, btime = 0;
+        quint32 mode = 0, uid = 0, gid = 0;
         bool isdir = false;
+        // дочитываются statx-ом при первом показе
+        mutable qint64 atime = -1, disk = -1;
     };
     static constexpr int kPage = 256;
     void onRows(qint64 id, qint64 from, const QCborArray& rows);
     const Row* row(int r) const;  // nullptr — ещё не загружена (запрос отправлен)
+    void loadStat(const Row& x) const;
 
     Client* client_;
     qint64 id_ = -1;

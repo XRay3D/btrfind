@@ -22,6 +22,7 @@ struct Entry {
     uint64_t ino;
     uint64_t size;
     int64_t mtime;
+    int64_t btime;  // время создания (0 — неизвестно)
     uint32_t parent;
     uint32_t first_child;
     uint32_t next_sibling;
@@ -31,13 +32,9 @@ struct Entry {
     uint16_t lname_len;
     uint16_t flags;
     uint16_t reserved;
-    uint32_t dir_slot;  // индекс в dir_meta (только каталоги)
+    uint32_t mode, uid, gid;  // права и владелец (для фильтра доступа, столбцов и сортировки)
 };
-static_assert(sizeof(Entry) == 56);
-
-struct DirMeta {
-    uint32_t mode, uid, gid;
-};
+static_assert(sizeof(Entry) == 72);
 
 struct NameStart {
     uint32_t off;  // смещение имени в lnames
@@ -46,7 +43,7 @@ struct NameStart {
 
 struct Attrs {
     uint64_t ino = 0, size = 0;
-    int64_t mtime = 0;
+    int64_t mtime = 0, btime = 0;
     bool dir = false;
     uint32_t mode = 0, uid = 0, gid = 0;
 };
@@ -59,7 +56,6 @@ public:
     std::vector<char> names;   // каждое имя + '\0'
     std::vector<char> lnames;  // свёрнутые имена + '\0'
     std::vector<NameStart> lname_starts;  // по возрастанию off
-    std::vector<DirMeta> dir_meta;
     std::unordered_map<uint64_t, uint32_t> dir_by_ino;
     uint64_t live = 0;             // живых записей
     uint64_t dead_bytes = 0;       // байты мёртвых имён в пулах

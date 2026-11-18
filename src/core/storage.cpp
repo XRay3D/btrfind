@@ -14,7 +14,7 @@ namespace bx {
 namespace {
 
 constexpr char kMagic[8] = {'B', 'T', 'R', 'F', 'I', 'N', 'D', '1'};
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;  // 2: btime/mode/uid/gid у всех записей
 
 struct Header {
     char magic[8];
@@ -23,7 +23,7 @@ struct Header {
     uint8_t uuid[16];
     uint64_t subvol, generation;
     uint64_t live, dead_bytes;
-    uint64_t n_entries, n_names, n_lnames, n_starts, n_meta;
+    uint64_t n_entries, n_names, n_lnames, n_starts;
     uint32_t root_len, reserved;
 };
 
@@ -66,12 +66,11 @@ bool save_index(const std::string& file, const Index& ix, const StoredMeta& meta
     h.n_names = ix.names.size();
     h.n_lnames = ix.lnames.size();
     h.n_starts = ix.lname_starts.size();
-    h.n_meta = ix.dir_meta.size();
     h.root_len = uint32_t(ix.root_path.size());
     const bool ok = fwrite(&h, sizeof h, 1, f.get()) == 1 &&
                     fwrite(ix.root_path.data(), 1, h.root_len, f.get()) == h.root_len &&
                     write_vec(f.get(), ix.entries) && write_vec(f.get(), ix.names) && write_vec(f.get(), ix.lnames) &&
-                    write_vec(f.get(), ix.lname_starts) && write_vec(f.get(), ix.dir_meta) && fflush(f.get()) == 0 &&
+                    write_vec(f.get(), ix.lname_starts) && fflush(f.get()) == 0 &&
                     fsync(fileno(f.get())) == 0;
     f.reset();
     if (!ok) {
@@ -96,7 +95,7 @@ bool load_index(const std::string& file, Index& ix, StoredMeta& meta, const Stor
     Header h{};
     if (fread(&h, sizeof h, 1, f.get()) != 1 || std::memcmp(h.magic, kMagic, 8) != 0 || h.version != kVersion ||
         h.entry_size != sizeof(Entry)) {
-        err = "неизвестный формат файла индекса";
+        err = "другой формат файла индекса (будет полный скан)";
         return false;
     }
     if (std::memcmp(h.uuid, expect.uuid.data(), 16) != 0 || h.subvol != expect.subvol) {
@@ -112,7 +111,7 @@ bool load_index(const std::string& file, Index& ix, StoredMeta& meta, const Stor
     nx.root_path.resize(h.root_len);
     if (fread(nx.root_path.data(), 1, h.root_len, f.get()) != h.root_len || !read_vec(f.get(), nx.entries, h.n_entries) ||
         !read_vec(f.get(), nx.names, h.n_names) || !read_vec(f.get(), nx.lnames, h.n_lnames) ||
-        !read_vec(f.get(), nx.lname_starts, h.n_starts) || !read_vec(f.get(), nx.dir_meta, h.n_meta)) {
+        !read_vec(f.get(), nx.lname_starts, h.n_starts)) {
         err = "файл индекса обрезан";
         return false;
     }
@@ -122,8 +121,7 @@ bool load_index(const std::string& file, Index& ix, StoredMeta& meta, const Stor
     for (uint32_t i = 0; i < n; ++i) {
         const Entry& e = nx.entries[i];
         if (bad(e.parent) || bad(e.first_child) || bad(e.next_sibling) ||
-            uint64_t(e.name_off) + e.name_len >= h.n_names || uint64_t(e.lname_off) + e.lname_len >= h.n_lnames ||
-            ((e.flags & kDir) && e.dir_slot >= h.n_meta)) {
+            uint64_t(e.name_off) + e.name_len >= h.n_names || uint64_t(e.lname_off) + e.lname_len >= h.n_lnames) {
             err = "повреждённая запись " + std::to_string(i);
             return false;
         }

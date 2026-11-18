@@ -32,6 +32,8 @@ public:
     qint64 search(const QString& q, const SearchOpts& o);
     void requestRows(qint64 id, qint64 from, qint64 count);
     void requestStatus();
+    // Сумма по диапазонам строк результата id: [[from, to), ...]; tag возвращается в ответе.
+    void requestSum(qint64 id, const QCborArray& ranges, qint64 tag);
 
     // Синхронное ожидание ответа (для консольного режима).
     bool waitConnected(int ms);
@@ -40,7 +42,8 @@ public:
 signals:
     void connected();
     void disconnected(const QString& reason);
-    void result(qint64 id, qint64 total, double ms, const QString& error);
+    void result(qint64 id, qint64 total, double ms, const QString& error, const QCborMap& m);
+    void sum(qint64 id, qint64 tag, qint64 bytes, qint64 files, qint64 dirs);
     void rows(qint64 id, qint64 from, const QCborArray& rows);
     void status(const QCborMap& m);
     void changed();

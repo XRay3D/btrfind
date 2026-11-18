@@ -4,9 +4,12 @@
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <grp.h>
+#include <pwd.h>
 #include <memory>
 #include <parallel/algorithm>
 #include <string>
+#include <map>
 #include <unordered_map>
 
 #ifdef _OPENMP
@@ -23,7 +26,7 @@ int search_threads() {
 #endif
 }
 
-bool Access::allowed(const DirMeta& m, unsigned bit) const {
+bool Access::allowed(const Entry& m, unsigned bit) const {
     if (uid == 0) return true;
     if (m.uid == uid) return (m.mode >> 6) & bit;
     if (std::find(gids.begin(), gids.end(), m.gid) != gids.end()) return (m.mode >> 3) & bit;
@@ -35,7 +38,8 @@ namespace {
 // Ленивая проверка видимости записи пользователю: r+x у родителя и x у всех предков.
 class Visibility {
 public:
-    Visibility(const Index& ix, const Access& acc) : ix_(ix), acc_(acc), trav_(ix.dir_meta.size()), read_(ix.dir_meta.size()) {}
+    Visibility(const Index& ix, const Access& acc)
+        : ix_(ix), acc_(acc), trav_(ix.entries.size()), read_(ix.entries.size()) {}
 
     bool visible(uint32_t i) {
         const uint32_t p = ix_.entries[i].parent;
@@ -44,16 +48,15 @@ public:
 
 private:
     bool check(std::vector<std::atomic<uint8_t>>& memo, uint32_t d, unsigned bit) {
-        const uint32_t slot = ix_.entries[d].dir_slot;
-        if (slot == kNone || slot >= memo.size()) return false;
-        uint8_t s = memo[slot].load(std::memory_order_relaxed);
+        if (d >= memo.size()) return false;
+        const uint8_t s = memo[d].load(std::memory_order_relaxed);
         if (s) return s == 1;
-        bool r = acc_.allowed(ix_.dir_meta[slot], bit);
+        bool r = acc_.allowed(ix_.entries[d], bit);
         if (r && bit == 1) {
             const uint32_t p = ix_.entries[d].parent;
             r = p == kNone || traversable(p);
         }
-        memo[slot].store(r ? 1 : 2, std::memory_order_relaxed);
+        memo[d].store(r ? 1 : 2, std::memory_order_relaxed);
         return r;
     }
     bool traversable(uint32_t d) { return check(trav_, d, 1); }
@@ -137,6 +140,15 @@ private:
                 break;
             case Term::Date:
                 r = e.mtime >= t.tmin && e.mtime <= t.tmax;
+                break;
+            case Term::Created:
+                r = e.btime != 0 && e.btime >= t.tmin && e.btime <= t.tmax;
+                break;
+            case Term::Uid:
+                r = e.uid == t.min;
+                break;
+            case Term::Gid:
+                r = e.gid == t.min;
                 break;
             case Term::IsFile:
                 r = !dir;
@@ -250,6 +262,55 @@ std::vector<Ref> run_search(const Query& q, const std::vector<SearchVolume>& vol
     return out;
 }
 
+Totals sum_results(const std::vector<Ref>& refs, const std::vector<const Index*>& by_vol, size_t from, size_t to) {
+    Totals t;
+    to = std::min(to, refs.size());
+    for (size_t k = from; k < to; ++k) {
+        const uint32_t v = ref_vol(refs[k]), i = ref_idx(refs[k]);
+        const Index* ix = v < by_vol.size() ? by_vol[v] : nullptr;
+        if (!ix || i >= ix->entries.size()) continue;
+        const Entry& e = ix->entries[i];
+        if (e.flags & kDir) {
+            ++t.dirs;
+        } else {
+            ++t.files;
+            t.bytes += e.size;
+        }
+    }
+    return t;
+}
+
+SortKey sort_key_from(std::string_view s) {
+    if (s == "path") return SortKey::Path;
+    if (s == "size") return SortKey::Size;
+    if (s == "mtime") return SortKey::Mtime;
+    if (s == "btime") return SortKey::Btime;
+    if (s == "ext" || s == "type") return SortKey::Ext;
+    if (s == "owner") return SortKey::Owner;
+    if (s == "group") return SortKey::Group;
+    if (s == "mode") return SortKey::Mode;
+    return SortKey::Name;
+}
+
+std::string_view extension_of(std::string_view ln, bool dir) {
+    if (dir) return {};
+    const size_t dot = ln.rfind('.');
+    return (dot == std::string_view::npos || dot == 0 || dot + 1 == ln.size()) ? std::string_view() : ln.substr(dot + 1);
+}
+
+namespace {
+std::string user_name(uint32_t uid) {
+    passwd pw{}, *res = nullptr;
+    char buf[4096];
+    return getpwuid_r(uid, &pw, buf, sizeof buf, &res) == 0 && res ? std::string(pw.pw_name) : std::to_string(uid);
+}
+std::string group_name(uint32_t gid) {
+    group gr{}, *res = nullptr;
+    char buf[4096];
+    return getgrgid_r(gid, &gr, buf, sizeof buf, &res) == 0 && res ? std::string(gr.gr_name) : std::to_string(gid);
+}
+}  // namespace
+
 void sort_results(std::vector<Ref>& refs, const std::vector<SearchVolume>& vols, SortKey key, bool desc) {
     uint32_t maxv = 0;
     for (const auto& v : vols) maxv = std::max(maxv, v.vol);
@@ -277,6 +338,40 @@ void sort_results(std::vector<Ref>& refs, const std::vector<SearchVolume>& vols,
         case SortKey::Mtime:
             less = [&](Ref a, Ref b) { return E(a).mtime != E(b).mtime ? E(a).mtime < E(b).mtime : by_name(a, b); };
             break;
+        case SortKey::Btime:
+            less = [&](Ref a, Ref b) { return E(a).btime != E(b).btime ? E(a).btime < E(b).btime : by_name(a, b); };
+            break;
+        case SortKey::Mode:
+            less = [&](Ref a, Ref b) {
+                const uint32_t ma = E(a).mode & 07777, mb = E(b).mode & 07777;
+                return ma != mb ? ma < mb : by_name(a, b);
+            };
+            break;
+        case SortKey::Ext:
+            less = [&](Ref a, Ref b) {
+                const bool da = E(a).flags & kDir, db = E(b).flags & kDir;
+                if (da != db) return da;  // папки — вместе, первыми
+                const int c = extension_of(LN(a), da).compare(extension_of(LN(b), db));
+                return c != 0 ? c < 0 : by_name(a, b);
+            };
+            break;
+        case SortKey::Owner:
+        case SortKey::Group: {
+            // Ранг по имени пользователя/группы (имён немного — разрешаются один раз).
+            const bool owner = key == SortKey::Owner;
+            std::map<uint32_t, std::string> names;
+            for (Ref r : refs) names.emplace(owner ? E(r).uid : E(r).gid, std::string());
+            std::vector<std::pair<std::string, uint32_t>> sorted;
+            for (auto& [id, n] : names) sorted.emplace_back(owner ? user_name(id) : group_name(id), id);
+            std::sort(sorted.begin(), sorted.end());
+            for (uint32_t k = 0; k < sorted.size(); ++k) rank[sorted[k].second] = k;
+            const auto& crank = rank;
+            less = [&, owner](Ref a, Ref b) {
+                const uint32_t ra = crank.at(owner ? E(a).uid : E(a).gid), rb = crank.at(owner ? E(b).uid : E(b).gid);
+                return ra != rb ? ra < rb : by_name(a, b);
+            };
+            break;
+        }
         case SortKey::Path: {
             std::vector<std::pair<std::string, Ref>> dirs;
             for (Ref r : refs) {

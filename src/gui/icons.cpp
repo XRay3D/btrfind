@@ -3,6 +3,7 @@
 #include <QFileIconProvider>
 #include <QHash>
 #include <QMimeDatabase>
+#include <QObject>
 
 namespace bx {
 
@@ -25,6 +26,22 @@ QIcon icon_for(const QString& name, bool dir) {
     if (cache.size() > 4000) cache.clear();
     cache.insert(key, icon);
     return icon;
+}
+
+QString type_for(const QString& name, bool dir) {
+    if (dir) return QObject::tr("Папка");
+    static QHash<QString, QString> cache;
+    static QMimeDatabase db;
+    const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
+    const QString key = dot > 0 ? name.mid(dot + 1).toLower() : QStringLiteral("#") + name.toLower();
+    auto it = cache.constFind(key);
+    if (it != cache.constEnd()) return *it;
+    const QMimeType mt = db.mimeTypeForFile(name, QMimeDatabase::MatchExtension);
+    QString t = mt.comment();
+    if (t.isEmpty() || mt.isDefault()) t = dot > 0 ? QObject::tr("Файл %1").arg(name.mid(dot + 1).toUpper()) : QObject::tr("Файл");
+    if (cache.size() > 4000) cache.clear();
+    cache.insert(key, t);
+    return t;
 }
 
 }  // namespace bx

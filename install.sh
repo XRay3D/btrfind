@@ -55,11 +55,18 @@ check_deps() {
         pkg-config --exists libpcre2-8 || missing+=("libpcre2-devel")
     fi
     [[ -f /usr/include/linux/btrfs.h ]] || missing+=("glibc-kernheaders")
+    local kio=0
+    for d in /usr/lib64/cmake/KF6KIO /usr/lib/cmake/KF6KIO /usr/lib/x86_64-linux-gnu/cmake/KF6KIO; do [[ -d $d ]] && kio=1; done
     if [[ ${#missing[@]} -gt 0 ]]; then
         die "не хватает пакетов: ${missing[*]}
   ALT Linux:  sudo apt-get install ${missing[*]} libgomp-devel"
     fi
     ok "cmake $(cmake --version | head -1 | awk '{print $3}'), g++ $(g++ -dumpversion), Qt $(pkg-config --modversion Qt6Core), PCRE2 $(pkg-config --modversion libpcre2-8)"
+    if [[ $kio -eq 1 ]]; then
+        ok "эскизы: KDE KIO (видео, PDF, документы — как в Dolphin)"
+    else
+        warn "эскизы только для изображений: для видео/PDF установите kf6-kio-devel и пересоберите"
+    fi
 
     local kmaj kmin
     IFS=. read -r kmaj kmin _ <<<"$(uname -r)"

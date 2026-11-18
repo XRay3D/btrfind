@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     client.connectToDaemon();
     // Отладка/проверка: снимок окна и выход (BTRFIND_SCREENSHOT=/путь/к/файлу.png).
     if (const QString shot = qEnvironmentVariable("BTRFIND_SCREENSHOT"); !shot.isEmpty())
-        QTimer::singleShot(3000, &w, [&w, shot] {
+        QTimer::singleShot(qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") > 0 ? qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") : 3000, &w, [&w, shot] {
             w.grab().save(shot);
             QApplication::quit();
         });

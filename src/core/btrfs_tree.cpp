@@ -44,6 +44,7 @@ Attrs attrs_of(uint64_t ino, const btrfs_inode_item& ii) {
     a.ino = ino;
     a.size = ii.size;
     a.mtime = int64_t(ii.mtime.sec);
+    a.btime = int64_t(ii.otime.sec);
     a.dir = S_ISDIR(ii.mode);
     a.mode = ii.mode;
     a.uid = ii.uid;

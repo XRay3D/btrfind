@@ -13,6 +13,7 @@
 #include <QtTest>
 
 #include <fcntl.h>
+#include <grp.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -270,6 +271,59 @@ private slots:
         QCOMPARE(int(run_search(q, {{&ix, 0}}, &owner, nullptr, nullptr).size()), 2);
         Access root{0, {}};
         QCOMPARE(int(run_search(q, {{&ix, 0}}, &root, nullptr, nullptr).size()), 2);
+    }
+
+    void attributes_filters_sorting() {
+        QTemporaryDir tmp;
+        const std::string R = tmp.path().toStdString();
+        mkdir((R + "/dir").c_str(), 0750);
+        touch(R + "/b.txt", 30);
+        touch(R + "/a.pdf", 10);
+        touch(R + "/c.txt", 20);
+        chmod((R + "/c.txt").c_str(), 0600);
+        Index ix;
+        WalkStats ws;
+        std::string err;
+        QVERIFY(walk_scan(R, {}, ix, ws, err));
+        const Entry& c = ix.entries[ix.lookup(R + "/c.txt")];
+        QCOMPARE(c.uid, uint32_t(getuid()));
+        QCOMPARE(c.mode & 07777, 0600u);
+        QVERIFY(S_ISREG(c.mode));
+        QVERIFY(S_ISDIR(ix.entries[ix.lookup(R + "/dir")].mode));
+
+        const std::vector<SearchVolume> vols{{&ix, 0}};
+        auto names = [&](const std::vector<Ref>& refs) {
+            std::vector<std::string> v;
+            for (Ref r : refs) v.emplace_back(ix.name(ref_idx(r)));
+            return v;
+        };
+        auto all = run_search(parse_query("", {}), vols, nullptr, nullptr, nullptr);
+        sort_results(all, vols, SortKey::Ext, false);  // папки первыми, затем по расширению
+        QCOMPARE(names(all), (std::vector<std::string>{"dir", "a.pdf", "b.txt", "c.txt"}));
+        sort_results(all, vols, SortKey::Mode, false);
+        QCOMPARE(names(all).front(), std::string("c.txt"));  // 0600 — наименьшие права
+        sort_results(all, vols, SortKey::Owner, false);
+        sort_results(all, vols, SortKey::Btime, true);
+        QCOMPARE(int(all.size()), 4);
+
+        // итоги: размер только файлов
+        std::vector<const Index*> by_vol{&ix};
+        const Totals t = sum_results(all, by_vol, 0, all.size());
+        QCOMPARE(t.bytes, uint64_t(60));
+        QCOMPARE(t.files, uint64_t(3));
+        QCOMPARE(t.dirs, uint64_t(1));
+        QCOMPARE(sum_results(all, by_vol, 1, 2).files + sum_results(all, by_vol, 1, 2).dirs, uint64_t(1));
+
+        // фильтры по владельцу и дате создания
+        const std::string me = std::to_string(getuid());
+        QCOMPARE(int(run_search(parse_query("owner:" + me + " .txt", {}), vols, nullptr, nullptr, nullptr).size()), 2);
+        QCOMPARE(int(run_search(parse_query("owner:999999 .txt", {}), vols, nullptr, nullptr, nullptr).size()), 0);
+        QVERIFY(!parse_query("owner:нет_такого_пользователя", {}).ok());
+        QVERIFY(parse_query("group:" + std::to_string(getgid()), {}).ok());
+        const bool has_btime = ix.entries[ix.lookup(R + "/a.pdf")].btime != 0;
+        if (has_btime)  // ФС с временем создания (btrfs, ext4, xfs, tmpfs)
+            QCOMPARE(int(run_search(parse_query("dc:today", {}), vols, nullptr, nullptr, nullptr).size()), 4);
+        QCOMPARE(int(run_search(parse_query("dc:<2000-01-01", {}), vols, nullptr, nullptr, nullptr).size()), 0);
     }
 
     void walk_and_reconcile() {

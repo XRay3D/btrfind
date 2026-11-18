@@ -21,6 +21,13 @@ pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network)
 if(BTRFIND_BUILD_GUI)
     find_package(Qt6 REQUIRED COMPONENTS Widgets DBus)
+    # Эскизы как в Dolphin (видео, PDF, …) — если есть KDE Frameworks KIO; иначе только изображения.
+    find_package(KF6KIO 6 QUIET)
+    if(KF6KIO_FOUND)
+        message(STATUS "Эскизы: KIO::PreviewJob (KF6 ${KF6KIO_VERSION})")
+    else()
+        message(STATUS "Эскизы: только изображения (KF6KIO не найден — пакет kf6-kio-devel)")
+    endif()
 endif()
 if(BTRFIND_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
@@ -86,11 +93,18 @@ if(BTRFIND_BUILD_GUI)
         src/gui/mainwindow.cpp
         src/gui/icons.cpp
         src/gui/renamedialog.cpp
+        src/gui/history.cpp
+        src/gui/thumbnails.cpp
+        src/gui/thumbdelegate.cpp
     )
     target_include_directories(btrfind PRIVATE src/gui)
     target_compile_options(btrfind PRIVATE ${BTRFIND_WARNINGS})
     target_link_libraries(btrfind PRIVATE btrfind_core Qt6::Network Qt6::Widgets Qt6::DBus)
     target_compile_definitions(btrfind PRIVATE BTRFIND_VERSION="${PROJECT_VERSION}")
+    if(KF6KIO_FOUND)
+        target_link_libraries(btrfind PRIVATE KF6::KIOGui KF6::KIOCore)
+        target_compile_definitions(btrfind PRIVATE BTRFIND_HAVE_KIO)
+    endif()
     install(TARGETS btrfind RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES packaging/btrfind.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     # Пункт «Искать здесь (btrfind)» в контекстном меню папок Dolphin/KDE (как «Search Everything…»)

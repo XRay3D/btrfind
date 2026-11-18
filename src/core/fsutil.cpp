@@ -25,12 +25,14 @@ bool stat_at(int dirfd, const char* name, FsStat& out) {
     out = FsStat{};
     struct statx sx {};
     if (statx(dirfd, name, AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_STATX_DONT_SYNC,
-              STATX_TYPE | STATX_MODE | STATX_UID | STATX_GID | STATX_INO | STATX_SIZE | STATX_MTIME, &sx) < 0)
+              STATX_TYPE | STATX_MODE | STATX_UID | STATX_GID | STATX_INO | STATX_SIZE | STATX_MTIME | STATX_BTIME,
+              &sx) < 0)
         return errno == ENOENT || errno == ENOTDIR;
     out.exists = true;
     out.a.ino = sx.stx_ino;
     out.a.size = sx.stx_size;
     out.a.mtime = sx.stx_mtime.tv_sec;
+    out.a.btime = (sx.stx_mask & STATX_BTIME) ? sx.stx_btime.tv_sec : 0;
     out.a.dir = S_ISDIR(sx.stx_mode);
     out.a.mode = sx.stx_mode;
     out.a.uid = sx.stx_uid;

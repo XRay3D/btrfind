@@ -4,6 +4,7 @@
 //   * и ? — маска на всё имя; '/' в слове — поиск по полному пути;
 //   regex:выражение; file: folder: ext:pdf;docx size:>10mb size:1kb..5mb size:large
 //   dm:today|yesterday|thisweek|thismonth|thisyear|2026-01-01|>2026-01-01|2026-01-01..2026-02-01
+//   dc:… — по дате создания (те же формы, что dm:); owner:имя|uid, group:имя|gid;
 //   path:слово — по полному пути.
 
 #include "matcher.h"
@@ -24,7 +25,7 @@ struct QueryOptions {
 };
 
 struct Term {
-    enum Kind : uint8_t { Substr, Glob, Regex, Ext, Size, Date, IsFile, IsDir };
+    enum Kind : uint8_t { Substr, Glob, Regex, Ext, Size, Date, Created, Uid, Gid, IsFile, IsDir };
     Kind kind = Substr;
     bool negate = false;
     bool path = false;

@@ -24,7 +24,7 @@ struct SearchVolume {
 struct Access {
     uint32_t uid = 0;
     std::vector<uint32_t> gids;
-    bool allowed(const DirMeta& m, unsigned bit /*4 = r, 1 = x*/) const;
+    bool allowed(const Entry& e, unsigned bit /*4 = r, 1 = x*/) const;
 };
 
 struct SearchStats {
@@ -37,8 +37,17 @@ struct SearchStats {
 std::vector<Ref> run_search(const Query& q, const std::vector<SearchVolume>& vols, const Access* access,
                             const std::atomic<bool>* cancel, SearchStats* stats);
 
-enum class SortKey { Name, Path, Size, Mtime };
+enum class SortKey { Name, Path, Size, Mtime, Btime, Ext, Owner, Group, Mode };
+SortKey sort_key_from(std::string_view s);  // "name", "path", "size", "mtime", "btime", "ext", "owner", "group", "mode"
+// Расширение имени (после последней точки; у каталогов и имён без точки — пусто).
+std::string_view extension_of(std::string_view lname, bool dir);
 void sort_results(std::vector<Ref>& refs, const std::vector<SearchVolume>& vols, SortKey key, bool desc);
+
+// Суммарный размер файлов и число файлов/папок для refs[from, to).
+struct Totals {
+    uint64_t bytes = 0, files = 0, dirs = 0;
+};
+Totals sum_results(const std::vector<Ref>& refs, const std::vector<const Index*>& by_vol, size_t from, size_t to);
 
 int search_threads();
 

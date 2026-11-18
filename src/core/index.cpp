@@ -19,9 +19,11 @@ void Index::reset(std::string root, const Attrs& ra) {
     e.size = ra.size;
     e.mtime = ra.mtime;
     e.parent = e.first_child = e.next_sibling = kNone;
+    e.btime = ra.btime;
     e.flags = kDir;
-    e.dir_slot = 0;
-    dir_meta.push_back({ra.mode, ra.uid, ra.gid});
+    e.mode = ra.mode;
+    e.uid = ra.uid;
+    e.gid = ra.gid;
     entries.push_back(e);
     push_name("", 0, entries[0]);
     dir_by_ino[ra.ino] = 0;
@@ -69,13 +71,12 @@ uint32_t Index::add(uint32_t parent, std::string_view name, const Attrs& a) {
     e.size = a.size;
     e.mtime = a.mtime;
     e.parent = e.first_child = e.next_sibling = kNone;
+    e.btime = a.btime;
     e.flags = a.dir ? kDir : 0;
-    e.dir_slot = kNone;
-    if (a.dir) {
-        e.dir_slot = uint32_t(dir_meta.size());
-        dir_meta.push_back({a.mode, a.uid, a.gid});
-        dir_by_ino[a.ino] = idx;
-    }
+    e.mode = a.mode;
+    e.uid = a.uid;
+    e.gid = a.gid;
+    if (a.dir) dir_by_ino[a.ino] = idx;
     entries.push_back(e);
     push_name(name, idx, entries.back());
     if (parent != kNone) link(idx, parent);
@@ -132,14 +133,14 @@ void Index::move(uint32_t idx, uint32_t new_parent, std::string_view new_name) {
 
 void Index::set_attrs(uint32_t idx, const Attrs& a) {
     Entry& e = entries[idx];
-    bool changed = e.size != a.size || e.mtime != a.mtime;
+    const bool changed = e.size != a.size || e.mtime != a.mtime || e.btime != a.btime || e.mode != a.mode ||
+                         e.uid != a.uid || e.gid != a.gid;
     e.size = a.size;
     e.mtime = a.mtime;
-    if (e.dir_slot != kNone) {
-        DirMeta& m = dir_meta[e.dir_slot];
-        changed |= m.mode != a.mode || m.uid != a.uid || m.gid != a.gid;
-        m = {a.mode, a.uid, a.gid};
-    }
+    e.btime = a.btime;
+    e.mode = a.mode;
+    e.uid = a.uid;
+    e.gid = a.gid;
     if (changed) ++version;
 }
 
@@ -240,11 +241,7 @@ void Index::compact() {
         e.parent = rm(o.parent);
         e.first_child = rm(o.first_child);
         e.next_sibling = rm(o.next_sibling);
-        if (o.flags & kDir) {
-            e.dir_slot = uint32_t(nx.dir_meta.size());
-            nx.dir_meta.push_back(dir_meta[o.dir_slot]);
-            nx.dir_by_ino[o.ino] = ni;
-        }
+        if (o.flags & kDir) nx.dir_by_ino[o.ino] = ni;
         nx.entries.push_back(e);
         Entry& ne = nx.entries.back();
         ne.name_off = uint32_t(nx.names.size());
@@ -260,7 +257,7 @@ void Index::compact() {
 
 size_t Index::memory_bytes() const {
     return entries.capacity() * sizeof(Entry) + names.capacity() + lnames.capacity() +
-           lname_starts.capacity() * sizeof(NameStart) + dir_meta.capacity() * sizeof(DirMeta) +
+           lname_starts.capacity() * sizeof(NameStart) +
            dir_by_ino.bucket_count() * sizeof(void*) + dir_by_ino.size() * 32;
 }
 

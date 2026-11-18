@@ -2,13 +2,15 @@
 // Протокол btrfindd <-> клиент: кадры [u32 big-endian длина][CBOR-map].
 //
 // Клиент -> демон:
-//   {op:"search", id, q, filter, case, regex, path, sort:"name|path|size|mtime", desc}
+//   {op:"search", id, q, filter, case, regex, path, sort:"name|path|size|mtime|btime|ext|owner|group|mode", desc}
 //      filter — дополнительные условия обычного синтаксиса (И), например "ext:pdf;doc" или "folder:"
 //   {op:"rows", id, from, count}
+//   {op:"sum", id, tag, ranges:[[from, to), ...]}  — размер выделенного
 //   {op:"status"}
 // Демон -> клиент:
-//   {op:"result", id, total, ms, error?}
-//   {op:"rows", id, from, rows:[[name, dir, size, mtime, isdir], ...]}
+//   {op:"result", id, total, ms, bytes, files, dirs, error?}
+//   {op:"sum", id, tag, bytes, files, dirs}
+//   {op:"rows", id, from, rows:[[name, dir, size, mtime, isdir, btime, mode, uid, gid], ...]}
 //   {op:"status", volumes:[{path, subvol, uuid, entries, state, generation}], version}
 //   {op:"changed"}  — индекс изменился, имеет смысл повторить запрос
 

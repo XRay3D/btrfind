@@ -32,6 +32,7 @@ private:
     void handle(const QCborMap& m);
     void start_search(const QCborMap& m);
     void send_rows(const QCborMap& m);
+    void send_sum(const QCborMap& m);
 
     Daemon& d_;
     QLocalSocket* sock_;
