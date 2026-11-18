@@ -263,8 +263,10 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
         if (restoring_) return;
         if (view_->selectionModel()->selectedRows().size() > 5000) {  // Ctrl+A на огромном результате
             selPaths_.clear();
+            trackSel_ = false;  // не пересчитывать выделение по путям — иначе снимется всё выделенное
             return;
         }
+        trackSel_ = true;
         const QStringList ps = selectedPaths();
         selPaths_ = QSet<QString>(ps.begin(), ps.end());
     });
@@ -682,9 +684,11 @@ void MainWindow::onStatus(const QCborMap& m) {
 }
 
 void MainWindow::restoreSelection(int first, int last) {
-    if (selPaths_.isEmpty() && curPath_.isEmpty()) return;
-    restoring_ = true;
     QItemSelectionModel* sm = view_->selectionModel();
+    // Пусто и ничего не выделено — сверять нечего. Если строки выделены, а путей нет (после удаления
+    // строки сдвинулись), выделение с чужих строк надо снять.
+    if (!trackSel_ || (selPaths_.isEmpty() && curPath_.isEmpty() && !sm->hasSelection())) return;
+    restoring_ = true;
     QItemSelection add, remove;
     const int lastCol = ResultModel::ColumnCount - 1;
     for (int r = first; r <= last; ++r) {
@@ -830,13 +834,20 @@ void MainWindow::removeSelected(bool permanent) {
     const RemoveResult r = permanent ? delete_permanently(top, mounts) : move_to_trash(top, mounts);
     QApplication::restoreOverrideCursor();
 
-    // Выделение: убрать удалённое (и содержимое удалённых папок)
+    // Выделение снимается полностью: строки ниже удалённых сдвинутся, и по номерам строк
+    // выделились бы другие файлы.
     QStringList gone = r.removed;
     for (const TrashedItem& t : r.trashed) gone << t.original;
-    for (const QString& g : std::as_const(gone)) {
-        for (auto it = selPaths_.begin(); it != selPaths_.end();)
-            it = (*it == g || it->startsWith(g + u'/')) ? selPaths_.erase(it) : std::next(it);
-        if (curPath_ == g || curPath_.startsWith(g + u'/')) curPath_.clear();
+    if (!gone.isEmpty()) {
+        QItemSelectionModel* sm = view_->selectionModel();
+        restoring_ = true;
+        sm->clearSelection();
+        sm->clearCurrentIndex();
+        restoring_ = false;
+        selPaths_.clear();
+        curPath_.clear();
+        trackSel_ = true;
+        requestSelectionSum();
     }
     if (!permanent && !r.trashed.empty()) {
         lastTrash_ = r.trashed;

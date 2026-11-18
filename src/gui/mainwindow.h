@@ -98,6 +98,7 @@ private:
     QSet<QString> selPaths_;  // выделение «по файлам», а не по номерам строк
     QString curPath_;
     bool restoring_ = false;
+    bool trackSel_ = true;  // selPaths_ отражает выделение (false — выделено слишком много, например Ctrl+A)
     std::vector<RenameDone> lastRename_;  // последняя партия — для отмены
     std::vector<TrashedItem> lastTrash_;
     enum class LastOp { None, Rename, Trash } lastOp_ = LastOp::None;
