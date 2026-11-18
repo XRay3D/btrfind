@@ -2,6 +2,7 @@
 
 #include "client.h"
 #include "history.h"
+#include "remove.h"
 #include "rename.h"
 
 #include <QCborMap>
@@ -23,6 +24,8 @@ class QTableView;
 class QToolButton;
 
 namespace bx {
+
+using namespace Qt::StringLiterals;
 
 class ResultModel;
 class ThumbDelegate;
@@ -58,6 +61,9 @@ private:
     void restoreSelection(int first, int last);
     void renameSelected();
     void undoRename();
+    void removeSelected(bool permanent);  // Del — в корзину, Shift+Del — безвозвратно
+    void restoreTrash();
+    void undoLast();                      // Ctrl+Z: откат последнего переименования или удаления в корзину
     void applyRenamed(const std::vector<RenameDone>& done);  // перенести выделение на новые пути
 
     // Вид: 0 — таблица, 1…5 — плитка эскизов разного размера
@@ -93,8 +99,10 @@ private:
     QString curPath_;
     bool restoring_ = false;
     std::vector<RenameDone> lastRename_;  // последняя партия — для отмены
+    std::vector<TrashedItem> lastTrash_;
+    enum class LastOp { None, Rename, Trash } lastOp_ = LastOp::None;
     QString folder_;
-    QString sort_ = QStringLiteral("name");
+    QString sort_ = u"name"_s;
     bool desc_ = false;
     int sortCol_ = 0;
     bool sortDescCol_ = false;

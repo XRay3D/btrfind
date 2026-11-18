@@ -8,6 +8,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -24,6 +25,7 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QScrollBar>
@@ -37,30 +39,32 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 
 struct Preset {
-    const char* title;
-    const char* filter;
+    const char* title;  // для tr()
+    QStringView filter;
 };
 const Preset kPresets[] = {
-    {"Все", ""},
-    {"Файлы", "file:"},
-    {"Папки", "folder:"},
-    {"Документы", "ext:doc;docx;odt;ods;odp;pdf;txt;rtf;xls;xlsx;ppt;pptx;md;csv;djvu;epub;fb2"},
-    {"Изображения", "ext:png;jpg;jpeg;gif;bmp;svg;webp;tif;tiff;ico;heic;avif;raw;cr2;nef;xcf;kra;psd"},
-    {"Аудио", "ext:mp3;flac;ogg;opus;wav;m4a;aac;wma;ape"},
-    {"Видео", "ext:mp4;mkv;avi;mov;webm;wmv;flv;m4v;mpg;mpeg;ts"},
-    {"Архивы", "ext:zip;rar;7z;tar;gz;bz2;xz;zst;tgz;iso;cab;rpm;deb"},
-    {"Исходники", "ext:c;h;cpp;hpp;cc;cxx;qml;py;rs;go;js;ts;java;kt;cs;sh;cmake;json;xml;yaml;yml;toml"},
+    {"Все", u""},
+    {"Файлы", u"file:"},
+    {"Папки", u"folder:"},
+    {"Документы", u"ext:doc;docx;odt;ods;odp;pdf;txt;rtf;xls;xlsx;ppt;pptx;md;csv;djvu;epub;fb2"},
+    {"Изображения", u"ext:png;jpg;jpeg;gif;bmp;svg;webp;tif;tiff;ico;heic;avif;raw;cr2;nef;xcf;kra;psd"},
+    {"Аудио", u"ext:mp3;flac;ogg;opus;wav;m4a;aac;wma;ape"},
+    {"Видео", u"ext:mp4;mkv;avi;mov;webm;wmv;flv;m4v;mpg;mpeg;ts"},
+    {"Архивы", u"ext:zip;rar;7z;tar;gz;bz2;xz;zst;tgz;iso;cab;rpm;deb"},
+    {"Исходники", u"ext:c;h;cpp;hpp;cc;cxx;qml;py;rs;go;js;ts;java;kt;cs;sh;cmake;json;xml;yaml;yml;toml"},
 };
 
 constexpr int kTileSizes[] = {64, 96, 128, 192, 256};
 constexpr int kModes = 1 + int(std::size(kTileSizes));
 const char* kModeTitles[] = {"Таблица", "Эскизы: мелкие", "Эскизы: средние", "Эскизы: крупные",
                              "Эскизы: очень крупные", "Эскизы: огромные"};
-const char* kHeaderKey = "header3";  // состояние заголовка (новый набор столбцов)
+const QString kHeaderKey = u"header3"_s;  // состояние заголовка (новый набор столбцов)
 
 QString human_count(qint64 n) {
     if (n >= 1000000) return QLocale().toString(n / 1e6, 'f', 2) + QObject::tr(" млн");
@@ -91,8 +95,8 @@ QToolButton* toggle_button(QAction* a, QWidget* parent) {
 }  // namespace
 
 MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c_(client) {
-    setWindowTitle(QStringLiteral("btrfind"));
-    setWindowIcon(QIcon::fromTheme(QStringLiteral("system-search")));
+    setWindowTitle(u"btrfind"_s);
+    setWindowIcon(QIcon::fromTheme(u"system-search"_s));
     model_ = new ResultModel(c_, this);
     thumbs_ = new ThumbnailProvider(this);
 
@@ -107,22 +111,22 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
     edit_->setPlaceholderText(tr("Поиск файлов и папок…  (*.pdf, ext:docx, size:>10mb, dm:today, regex:…)"));
     edit_->setClearButtonEnabled(true);
     edit_->installEventFilter(this);
-    QIcon histIcon = QIcon::fromTheme(QStringLiteral("document-open-recent"), QIcon::fromTheme(QStringLiteral("view-history")));
+    QIcon histIcon = QIcon::fromTheme(u"document-open-recent"_s, QIcon::fromTheme(u"view-history"_s));
     QAction* histBtn = edit_->addAction(histIcon, QLineEdit::TrailingPosition);
     histBtn->setToolTip(tr("История поиска (Ctrl+H)"));
     connect(histBtn, &QAction::triggered, this, &MainWindow::showHistoryPopup);
     folderChip_ = new QToolButton(central);
-    folderChip_->setIcon(QIcon::fromTheme(QStringLiteral("folder")));
+    folderChip_->setIcon(QIcon::fromTheme(u"folder"_s));
     folderChip_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     folderChip_->setAutoRaise(true);
     folderChip_->setToolTip(tr("Поиск только в этой папке — нажмите, чтобы искать везде"));
     folderChip_->hide();
     connect(folderChip_, &QToolButton::clicked, this, [this] { setFolder({}); });
-    aCase_ = toggle_action(QStringLiteral("Aa"), tr("С учётом регистра"), this);
-    aRegex_ = toggle_action(QStringLiteral(".*"), tr("Регулярное выражение (весь запрос, PCRE2)"), this);
-    aPath_ = toggle_action(QStringLiteral("/"), tr("Искать по полному пути"), this);
+    aCase_ = toggle_action(u"Aa"_s, tr("С учётом регистра"), this);
+    aRegex_ = toggle_action(u".*"_s, tr("Регулярное выражение (весь запрос, PCRE2)"), this);
+    aPath_ = toggle_action(u"/"_s, tr("Искать по полному пути"), this);
     filter_ = new QComboBox(central);
-    for (const Preset& p : kPresets) filter_->addItem(tr(p.title), QString::fromUtf8(p.filter));
+    for (const Preset& p : kPresets) filter_->addItem(tr(p.title), p.filter.toString());
     top->addWidget(folderChip_);
     top->addWidget(edit_, 1);
     for (QAction* a : {aCase_, aRegex_, aPath_}) top->addWidget(toggle_button(a, central));
@@ -283,15 +287,15 @@ MainWindow::MainWindow(Client* client, QWidget* parent) : QMainWindow(parent), c
 
     // --- настройки
     QSettings s;
-    restoreGeometry(s.value(QStringLiteral("geometry")).toByteArray());
-    if (!hh->restoreState(s.value(QLatin1String(kHeaderKey)).toByteArray()))
+    restoreGeometry(s.value(u"geometry"_s).toByteArray());
+    if (!hh->restoreState(s.value(kHeaderKey).toByteArray()))
         for (int c = ResultModel::Created; c < ResultModel::ColumnCount; ++c) hh->setSectionHidden(c, true);
-    aCase_->setChecked(s.value(QStringLiteral("case")).toBool());
-    aRegex_->setChecked(s.value(QStringLiteral("regex")).toBool());
-    aPath_->setChecked(s.value(QStringLiteral("path")).toBool());
-    filter_->setCurrentIndex(s.value(QStringLiteral("filter")).toInt());
-    if (!s.contains(QStringLiteral("geometry"))) resize(1100, 700);
-    setViewMode(s.value(QStringLiteral("view/mode"), 0).toInt());
+    aCase_->setChecked(s.value(u"case"_s).toBool());
+    aRegex_->setChecked(s.value(u"regex"_s).toBool());
+    aPath_->setChecked(s.value(u"path"_s).toBool());
+    filter_->setCurrentIndex(s.value(u"filter"_s).toInt());
+    if (!s.contains(u"geometry"_s)) resize(1100, 700);
+    setViewMode(s.value(u"view/mode"_s, 0).toInt());
     sortCol_ = hh->sortIndicatorSection();
     sortDescCol_ = hh->sortIndicatorOrder() == Qt::DescendingOrder;
     if (!ResultModel::sortable(sortCol_)) sortCol_ = ResultModel::Name;
@@ -316,28 +320,31 @@ void MainWindow::buildMenus() {
     };
 
     QMenu* file = menuBar()->addMenu(tr("&Файл"));
-    add(file, tr("Открыть"), QStringLiteral("document-open"), {}, [this] { openSelected(); });
-    add(file, tr("Показать в папке"), QStringLiteral("folder-open"), {}, [this] { openFolders(); });
+    add(file, tr("Открыть"), u"document-open"_s, {}, [this] { openSelected(); });
+    add(file, tr("Показать в папке"), u"folder-open"_s, {}, [this] { openFolders(); });
     file->addSeparator();
-    add(file, tr("Выход"), QStringLiteral("application-exit"), QKeySequence::Quit, [this] { close(); });
+    add(file, tr("Выход"), u"application-exit"_s, QKeySequence::Quit, [this] { close(); });
 
     QMenu* edit = menuBar()->addMenu(tr("&Правка"));
-    add(edit, tr("Копировать"), QStringLiteral("edit-copy"), QKeySequence::Copy, [this] { copyFiles(); }, stack_);
-    add(edit, tr("Копировать полный путь"), QStringLiteral("edit-copy-path"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C),
+    add(edit, tr("Копировать"), u"edit-copy"_s, QKeySequence::Copy, [this] { copyFiles(); }, stack_);
+    add(edit, tr("Копировать полный путь"), u"edit-copy-path"_s, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C),
         [this] { copyPaths(); }, stack_);
     add(edit, tr("Копировать имя"), {}, {}, [this] { copyNames(); });
     edit->addSeparator();
-    add(edit, tr("Переименовать…"), QStringLiteral("edit-rename"), QKeySequence(Qt::Key_F2), [this] { renameSelected(); });
-    add(edit, tr("Отменить переименование"), QStringLiteral("edit-undo"), QKeySequence::Undo, [this] { undoRename(); },
+    add(edit, tr("Переименовать…"), u"edit-rename"_s, QKeySequence(Qt::Key_F2), [this] { renameSelected(); });
+    add(edit, tr("Удалить в корзину"), u"edit-delete"_s, QKeySequence(Qt::Key_Delete), [this] { removeSelected(false); },
         stack_);
+    add(edit, tr("Удалить безвозвратно…"), u"edit-delete-shred"_s, QKeySequence(Qt::SHIFT | Qt::Key_Delete),
+        [this] { removeSelected(true); }, stack_);
+    add(edit, tr("Отменить"), u"edit-undo"_s, QKeySequence::Undo, [this] { undoLast(); }, stack_);
     edit->addSeparator();
-    add(edit, tr("Выделить всё"), QStringLiteral("edit-select-all"), QKeySequence::SelectAll,
+    add(edit, tr("Выделить всё"), u"edit-select-all"_s, QKeySequence::SelectAll,
         [this] { currentView()->selectAll(); }, stack_);
 
     QMenu* view = menuBar()->addMenu(tr("&Вид"));
     viewGroup_ = new QActionGroup(this);
     for (int m = 0; m < kModes; ++m) {
-        QAction* a = add(view, tr(kModeTitles[m]), m == 0 ? QStringLiteral("view-list-details") : QStringLiteral("view-preview"),
+        QAction* a = add(view, tr(kModeTitles[m]), m == 0 ? u"view-list-details"_s : u"view-preview"_s,
                          QKeySequence(Qt::CTRL | (Qt::Key_1 + m)), [this, m] { setViewMode(m); });
         a->setCheckable(true);
         viewGroup_->addAction(a);
@@ -349,16 +356,16 @@ void MainWindow::buildMenus() {
     QMenu* sort = view->addMenu(tr("Сортировка"));
     connect(sort, &QMenu::aboutToShow, this, [this, sort] { fillSortMenu(sort); });
     view->addSeparator();
-    add(view, tr("Обновить"), QStringLiteral("view-refresh"), QKeySequence::Refresh, [this] { runSearch(); });
+    add(view, tr("Обновить"), u"view-refresh"_s, QKeySequence::Refresh, [this] { runSearch(); });
     QAction* hint = view->addAction(tr("Ctrl+колесо мыши — таблица ↔ эскизы"));
     hint->setEnabled(false);
 
     QMenu* search = menuBar()->addMenu(tr("&Поиск"));
-    add(search, tr("Найти"), QStringLiteral("edit-find"), QKeySequence::Find, [this] {
+    add(search, tr("Найти"), u"edit-find"_s, QKeySequence::Find, [this] {
         edit_->setFocus();
         edit_->selectAll();
     });
-    add(search, tr("История поиска…"), QStringLiteral("document-open-recent"), QKeySequence(Qt::CTRL | Qt::Key_H),
+    add(search, tr("История поиска…"), u"document-open-recent"_s, QKeySequence(Qt::CTRL | Qt::Key_H),
         [this] { showHistoryPopup(); });
     QMenu* hist = search->addMenu(tr("Недавние запросы"));
     connect(hist, &QMenu::aboutToShow, this, [this, hist] { fillHistoryMenu(hist); });
@@ -367,7 +374,7 @@ void MainWindow::buildMenus() {
     search->addAction(aRegex_);
     search->addAction(aPath_);
     search->addSeparator();
-    add(search, tr("Очистить историю"), QStringLiteral("edit-clear-history"), {}, [this] {
+    add(search, tr("Очистить историю"), u"edit-clear-history"_s, {}, [this] {
         history_.clear();
         statusBar()->showMessage(tr("История поиска очищена"), 3000);
     });
@@ -378,13 +385,13 @@ void MainWindow::buildMenus() {
 
 void MainWindow::closeEvent(QCloseEvent* e) {
     QSettings s;
-    s.setValue(QStringLiteral("geometry"), saveGeometry());
-    s.setValue(QLatin1String(kHeaderKey), view_->horizontalHeader()->saveState());
-    s.setValue(QStringLiteral("case"), aCase_->isChecked());
-    s.setValue(QStringLiteral("regex"), aRegex_->isChecked());
-    s.setValue(QStringLiteral("path"), aPath_->isChecked());
-    s.setValue(QStringLiteral("filter"), filter_->currentIndex());
-    s.setValue(QStringLiteral("view/mode"), viewMode_);
+    s.setValue(u"geometry"_s, saveGeometry());
+    s.setValue(kHeaderKey, view_->horizontalHeader()->saveState());
+    s.setValue(u"case"_s, aCase_->isChecked());
+    s.setValue(u"regex"_s, aRegex_->isChecked());
+    s.setValue(u"path"_s, aPath_->isChecked());
+    s.setValue(u"filter"_s, filter_->currentIndex());
+    s.setValue(u"view/mode"_s, viewMode_);
     commitHistory();
     e->accept();
 }
@@ -526,20 +533,20 @@ bool MainWindow::eventFilter(QObject* o, QEvent* e) {
 
 QString MainWindow::filterText() const {
     QString f = filter_->currentData().toString();
-    if (!folder_.isEmpty() && folder_ != QLatin1String("/")) {
+    if (!folder_.isEmpty() && folder_ != u"/"_s) {
         QString d = folder_;
-        d.replace(QLatin1Char('"'), QString());
-        f += QStringLiteral(" path:\"%1/\"").arg(d);
+        d.replace(u'"', QString());
+        f += u" path:\"%1/\""_s.arg(d);
     }
     return f.trimmed();
 }
 
 void MainWindow::setFolder(const QString& dir) {
     QString d = dir;
-    while (d.size() > 1 && d.endsWith(QLatin1Char('/'))) d.chop(1);
+    while (d.size() > 1 && d.endsWith(u'/')) d.chop(1);
     folder_ = d;
-    folderChip_->setVisible(!d.isEmpty() && d != QLatin1String("/"));
-    folderChip_->setText(d + QStringLiteral("  ✕"));
+    folderChip_->setVisible(!d.isEmpty() && d != u"/"_s);
+    folderChip_->setText(d + u"  ✕"_s);
     runSearch();
 }
 
@@ -594,9 +601,9 @@ void MainWindow::onResult(qint64 id, qint64 total, double ms, const QString& err
     }
     total_ = total;
     ms_ = ms;
-    totalBytes_ = m.value("bytes").toInteger(-1);  // -1 — старый демон без итогов
-    totalFiles_ = m.value("files").toInteger();
-    totalDirs_ = m.value("dirs").toInteger();
+    totalBytes_ = m.value(u"bytes"_s).toInteger(-1);  // -1 — старый демон без итогов
+    totalFiles_ = m.value(u"files"_s).toInteger();
+    totalDirs_ = m.value(u"dirs"_s).toInteger();
     requestSelectionSum();
 }
 
@@ -628,7 +635,7 @@ void MainWindow::requestSelectionSum() {
 
 void MainWindow::updateCountLabel() {
     if (!error_.isEmpty()) {
-        count_->setText(QStringLiteral("<span style='color:#d33'>%1</span>").arg(error_.toHtmlEscaped()));
+        count_->setText(u"<span style='color:#d33'>%1</span>"_s.arg(error_.toHtmlEscaped()));
         return;
     }
     QString t = tr("%1 объектов").arg(QLocale().toString(total_));
@@ -641,7 +648,7 @@ void MainWindow::updateCountLabel() {
         QString s = tr("Выделено: %1").arg(QLocale().toString(selCount_));
         if (selBytes_ >= 0) s += tr(" · %1").arg(size_text(selBytes_));
         if (selBytes_ >= 0 && selDirs_ > 0) s += tr(" (папок %1 — размер без содержимого)").arg(selDirs_);
-        t = QStringLiteral("<b>%1</b> — %2").arg(s.toHtmlEscaped(), t.toHtmlEscaped());
+        t = u"<b>%1</b> — %2"_s.arg(s.toHtmlEscaped(), t.toHtmlEscaped());
     }
     count_->setText(t);
 }
@@ -649,24 +656,24 @@ void MainWindow::updateCountLabel() {
 void MainWindow::onStatus(const QCborMap& m) {
     QStringList parts;
     bool all_ready = true, live = true;
-    for (const QCborValue& v : m.value("volumes").toArray()) {
+    for (const QCborValue& v : m.value(u"volumes"_s).toArray()) {
         const QCborMap vm = v.toMap();
-        const QString state = vm.value("state").toString();
-        if (state == QLatin1String("removed")) continue;
-        QString s = vm.value("path").toString() + QLatin1Char(' ');
-        if (state == QLatin1String("ready")) {
-            s += human_count(vm.value("entries").toInteger());
+        const QString state = vm.value(u"state"_s).toString();
+        if (state == u"removed"_s) continue;
+        QString s = vm.value(u"path"_s).toString() + u' ';
+        if (state == u"ready"_s) {
+            s += human_count(vm.value(u"entries"_s).toInteger());
         } else {
-            s += state == QLatin1String("scanning")      ? tr("индексация…")
-                 : state == QLatin1String("catching-up") ? tr("догон изменений…")
-                 : state == QLatin1String("error")       ? tr("ошибка")
+            s += state == u"scanning"_s      ? tr("индексация…")
+                 : state == u"catching-up"_s ? tr("догон изменений…")
+                 : state == u"error"_s       ? tr("ошибка")
                                                          : tr("загрузка…");
             all_ready = false;
         }
-        live &= vm.value("live").toBool();
+        live &= vm.value(u"live"_s).toBool();
         parts << s;
     }
-    QString text = parts.join(QStringLiteral(" · "));
+    QString text = parts.join(u" · "_s);
     if (!live) text += tr(" · <span style='color:#c80'>без живых обновлений</span>");
     daemon_->setText(text);
     statusTimer_.setInterval(all_ready ? 30000 : 2000);
@@ -720,7 +727,7 @@ void MainWindow::fillHistoryMenu(QMenu* m) {
         });
     }
     m->addSeparator();
-    m->addAction(QIcon::fromTheme(QStringLiteral("edit-clear-history")), tr("Очистить историю"), this,
+    m->addAction(QIcon::fromTheme(u"edit-clear-history"_s), tr("Очистить историю"), this,
                  [this] { history_.clear(); });
 }
 
@@ -753,6 +760,7 @@ void MainWindow::renameSelected() {
     }
     if (r.done.empty()) return;
     lastRename_ = r.done;
+    lastOp_ = LastOp::Rename;
     applyRenamed(r.done);
     statusBar()->showMessage(tr("Переименовано: %1 · Ctrl+Z — отменить").arg(r.done.size()), 10000);
 }
@@ -764,15 +772,111 @@ void MainWindow::undoRename() {
     }
     const RenameResult r = undo_rename(lastRename_);
     lastRename_.clear();
+    lastOp_ = LastOp::None;
     applyRenamed(r.done);
     if (!r.errors.isEmpty()) {
         QMessageBox box(QMessageBox::Warning, tr("Отмена переименования"),
                         tr("Возвращено: %1, не удалось: %2.").arg(r.done.size()).arg(r.errors.size()), QMessageBox::Ok,
                         this);
-        box.setDetailedText(r.errors.join(QLatin1Char('\n')));
+        box.setDetailedText(r.errors.join(u'\n'));
         box.exec();
     }
     statusBar()->showMessage(tr("Возвращено прежних имён: %1").arg(r.done.size()), 6000);
+}
+
+// ---------------------------------------------------------------- удаление
+
+void MainWindow::removeSelected(bool permanent) {
+    const QModelIndexList rows = view_->selectionModel()->selectedRows();
+    if (rows.isEmpty()) return;
+    const QStringList paths = selectedPaths();
+    if (paths.size() != rows.size()) {
+        statusBar()->showMessage(tr("Не все выделенные строки загружены — прокрутите к ним или выделите меньше"), 6000);
+        return;
+    }
+    commitHistory();
+    const QStringList top = top_level_paths(paths);
+    int dirs = 0;
+    for (const QModelIndex& i : rows) dirs += i.siblingAtColumn(0).data(ResultModel::IsDirRole).toBool();
+
+    QStringList names;
+    for (const QString& p : top.mid(0, 10)) names << p;
+    if (top.size() > 10) names << tr("… и ещё %1").arg(top.size() - 10);
+    QSettings s;
+    if (permanent) {
+        QMessageBox box(QMessageBox::Warning, tr("Удалить безвозвратно"),
+                        tr("Удалить безвозвратно объектов: %1? Это действие нельзя отменить.").arg(top.size()),
+                        QMessageBox::Yes | QMessageBox::No, this);
+        box.setInformativeText((dirs ? tr("Папки удаляются вместе со всем содержимым.\n\n") : QString()) +
+                               names.join(u'\n'));
+        box.setDefaultButton(QMessageBox::No);
+        box.button(QMessageBox::Yes)->setText(tr("Удалить безвозвратно"));
+        if (box.exec() != QMessageBox::Yes) return;
+    } else if (s.value(u"delete/confirmTrash"_s, true).toBool()) {
+        QMessageBox box(QMessageBox::Question, tr("Удалить в корзину"),
+                        tr("Переместить в корзину объектов: %1?").arg(top.size()), QMessageBox::Yes | QMessageBox::No,
+                        this);
+        box.setInformativeText(names.join(u'\n'));
+        box.setDefaultButton(QMessageBox::Yes);
+        box.button(QMessageBox::Yes)->setText(tr("В корзину"));
+        auto* dontAsk = new QCheckBox(tr("Больше не спрашивать (Ctrl+Z вернёт удалённое)"), &box);
+        box.setCheckBox(dontAsk);
+        if (box.exec() != QMessageBox::Yes) return;
+        if (dontAsk->isChecked()) s.setValue(u"delete/confirmTrash"_s, false);
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const std::vector<MountInfo> mounts = read_mountinfo();
+    const RemoveResult r = permanent ? delete_permanently(top, mounts) : move_to_trash(top, mounts);
+    QApplication::restoreOverrideCursor();
+
+    // Выделение: убрать удалённое (и содержимое удалённых папок)
+    QStringList gone = r.removed;
+    for (const TrashedItem& t : r.trashed) gone << t.original;
+    for (const QString& g : std::as_const(gone)) {
+        for (auto it = selPaths_.begin(); it != selPaths_.end();)
+            it = (*it == g || it->startsWith(g + u'/')) ? selPaths_.erase(it) : std::next(it);
+        if (curPath_ == g || curPath_.startsWith(g + u'/')) curPath_.clear();
+    }
+    if (!permanent && !r.trashed.empty()) {
+        lastTrash_ = r.trashed;
+        lastOp_ = LastOp::Trash;
+    }
+    if (!r.errors.isEmpty()) {
+        QMessageBox box(QMessageBox::Warning, permanent ? tr("Удаление") : tr("Удаление в корзину"),
+                        tr("Удалено: %1, не удалось: %2.").arg(gone.size()).arg(r.errors.size()), QMessageBox::Ok, this);
+        box.setDetailedText(r.errors.join(u'\n'));
+        box.exec();
+    }
+    if (!gone.isEmpty())
+        statusBar()->showMessage(permanent ? tr("Удалено безвозвратно: %1").arg(gone.size())
+                                           : tr("В корзине: %1 · Ctrl+Z — восстановить").arg(gone.size()),
+                                 10000);
+    if (!refreshTimer_.isActive()) refreshTimer_.start();
+}
+
+void MainWindow::restoreTrash() {
+    const RemoveResult r = restore_from_trash(lastTrash_);
+    lastTrash_.clear();
+    lastOp_ = LastOp::None;
+    for (const QString& p : r.removed) selPaths_.insert(p);  // вернувшиеся снова выделены
+    if (!r.errors.isEmpty()) {
+        QMessageBox box(QMessageBox::Warning, tr("Восстановление из корзины"),
+                        tr("Восстановлено: %1, не удалось: %2.").arg(r.removed.size()).arg(r.errors.size()),
+                        QMessageBox::Ok, this);
+        box.setDetailedText(r.errors.join(u'\n'));
+        box.exec();
+    }
+    statusBar()->showMessage(tr("Восстановлено из корзины: %1").arg(r.removed.size()), 6000);
+    if (!refreshTimer_.isActive()) refreshTimer_.start();
+}
+
+void MainWindow::undoLast() {
+    switch (lastOp_) {
+        case LastOp::Rename: undoRename(); break;
+        case LastOp::Trash: restoreTrash(); break;
+        case LastOp::None: statusBar()->showMessage(tr("Нечего отменять"), 3000); break;
+    }
 }
 
 void MainWindow::applyRenamed(const std::vector<RenameDone>& done) {
@@ -780,7 +884,7 @@ void MainWindow::applyRenamed(const std::vector<RenameDone>& done) {
     auto remap = [](QString& p, const QString& from, const QString& to) {
         if (p == from)
             p = to;
-        else if (p.startsWith(from + QLatin1Char('/')))
+        else if (p.startsWith(from + u'/'))
             p = to + p.mid(from.size());
     };
     for (const RenameDone& d : done) {
@@ -820,10 +924,10 @@ void MainWindow::openFolders() {
     // Файловый менеджер с выделением файла (Dolphin, Nautilus и др. поддерживают FileManager1).
     QStringList uris;
     for (const QString& p : ps.mid(0, 20)) uris << QUrl::fromLocalFile(p).toString();
-    QDBusMessage msg = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.FileManager1"),
-                                                      QStringLiteral("/org/freedesktop/FileManager1"),
-                                                      QStringLiteral("org.freedesktop.FileManager1"),
-                                                      QStringLiteral("ShowItems"));
+    QDBusMessage msg = QDBusMessage::createMethodCall(u"org.freedesktop.FileManager1"_s,
+                                                      u"/org/freedesktop/FileManager1"_s,
+                                                      u"org.freedesktop.FileManager1"_s,
+                                                      u"ShowItems"_s);
     msg << uris << QString();
     const QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 3000);
     if (reply.type() == QDBusMessage::ErrorMessage)
@@ -832,14 +936,14 @@ void MainWindow::openFolders() {
 
 void MainWindow::copyPaths() {
     commitHistory();
-    QApplication::clipboard()->setText(selectedPaths().join(QLatin1Char('\n')));
+    QApplication::clipboard()->setText(selectedPaths().join(u'\n'));
 }
 
 void MainWindow::copyNames() {
     commitHistory();
     QStringList names;
     for (const QString& p : selectedPaths()) names << QFileInfo(p).fileName();
-    QApplication::clipboard()->setText(names.join(QLatin1Char('\n')));
+    QApplication::clipboard()->setText(names.join(u'\n'));
 }
 
 void MainWindow::copyFiles() {  // как в файловом менеджере: вставляется копия файлов
@@ -848,7 +952,7 @@ void MainWindow::copyFiles() {  // как в файловом менеджере
     QList<QUrl> urls;
     for (const QString& p : selectedPaths()) urls << QUrl::fromLocalFile(p);
     md->setUrls(urls);
-    md->setText(selectedPaths().join(QLatin1Char('\n')));
+    md->setText(selectedPaths().join(u'\n'));
     QApplication::clipboard()->setMimeData(md);
 }
 
@@ -863,26 +967,34 @@ void MainWindow::showContextMenu(QAbstractItemView* v, const QPoint& pos) {
     const QString full = model_->fullPath(idx.row());
 
     QMenu m(this);
-    m.addAction(QIcon::fromTheme(QStringLiteral("document-open")), tr("Открыть"), QKeySequence(Qt::Key_Return), this,
+    m.addAction(QIcon::fromTheme(u"document-open"_s), tr("Открыть"), QKeySequence(Qt::Key_Return), this,
                 &MainWindow::openSelected);
-    m.addAction(QIcon::fromTheme(QStringLiteral("folder-open")), tr("Показать в папке"),
+    m.addAction(QIcon::fromTheme(u"folder-open"_s), tr("Показать в папке"),
                 QKeySequence(Qt::CTRL | Qt::Key_Return), this, &MainWindow::openFolders);
     m.addSeparator();
-    m.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), tr("Копировать"), QKeySequence::Copy, this,
+    m.addAction(QIcon::fromTheme(u"edit-copy"_s), tr("Копировать"), QKeySequence::Copy, this,
                 &MainWindow::copyFiles);
-    m.addAction(QIcon::fromTheme(QStringLiteral("edit-copy-path")), tr("Копировать полный путь"),
+    m.addAction(QIcon::fromTheme(u"edit-copy-path"_s), tr("Копировать полный путь"),
                 QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C), this, &MainWindow::copyPaths);
     m.addAction(tr("Копировать имя"), this, &MainWindow::copyNames);
     m.addSeparator();
     const int nsel = int(sm->selectedRows().size());
-    m.addAction(QIcon::fromTheme(QStringLiteral("edit-rename")),
+    m.addAction(QIcon::fromTheme(u"edit-rename"_s),
                 nsel > 1 ? tr("Переименовать %1 объектов…").arg(nsel) : tr("Переименовать…"),
                 QKeySequence(Qt::Key_F2), this, &MainWindow::renameSelected);
-    if (!lastRename_.empty())
-        m.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), tr("Отменить переименование"), QKeySequence::Undo,
-                    this, &MainWindow::undoRename);
     m.addSeparator();
-    m.addAction(QIcon::fromTheme(QStringLiteral("system-search")), tr("Искать в «%1»").arg(isdir ? full : dir), this,
+    m.addAction(QIcon::fromTheme(u"edit-delete"_s), tr("Удалить в корзину"), QKeySequence(Qt::Key_Delete), this,
+                [this] { removeSelected(false); });
+    m.addAction(QIcon::fromTheme(u"edit-delete-shred"_s), tr("Удалить безвозвратно…"),
+                QKeySequence(Qt::SHIFT | Qt::Key_Delete), this, [this] { removeSelected(true); });
+    if (lastOp_ == LastOp::Rename)
+        m.addAction(QIcon::fromTheme(u"edit-undo"_s), tr("Отменить переименование"), QKeySequence::Undo, this,
+                    &MainWindow::undoLast);
+    else if (lastOp_ == LastOp::Trash)
+        m.addAction(QIcon::fromTheme(u"edit-undo"_s), tr("Восстановить из корзины (%1)").arg(lastTrash_.size()),
+                    QKeySequence::Undo, this, &MainWindow::undoLast);
+    m.addSeparator();
+    m.addAction(QIcon::fromTheme(u"system-search"_s), tr("Искать в «%1»").arg(isdir ? full : dir), this,
                 [this, isdir, full, dir] { setFolder(isdir ? full : dir); });
     m.exec(v->viewport()->mapToGlobal(pos));
 }

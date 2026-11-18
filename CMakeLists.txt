@@ -4,6 +4,7 @@ project(btrfind VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # для подсветки кода в IDE (build/compile_commands.json)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -51,10 +52,13 @@ add_library(btrfind_core STATIC
     src/core/search.cpp
     src/core/protocol.cpp
     src/core/rename.cpp
+    src/core/remove.cpp
 )
 target_include_directories(btrfind_core PUBLIC src/core)
 target_compile_options(btrfind_core PRIVATE ${BTRFIND_WARNINGS})
 target_link_libraries(btrfind_core PUBLIC Qt6::Core Threads::Threads OpenMP::OpenMP_CXX PkgConfig::PCRE2)
+# Все строки Qt — явные литералы u"…"_s: неявное const char* -> QString запрещено во всём проекте.
+target_compile_definitions(btrfind_core PUBLIC QT_NO_CAST_FROM_ASCII QT_NO_CAST_TO_ASCII)
 
 # ---- диагностика
 if(BTRFIND_BUILD_POC)
@@ -122,4 +126,7 @@ if(BTRFIND_BUILD_TESTS)
     add_executable(test_rename tests/test_rename.cpp)
     target_link_libraries(test_rename PRIVATE btrfind_core Qt6::Test)
     add_test(NAME test_rename COMMAND test_rename)
+    add_executable(test_remove tests/test_remove.cpp)
+    target_link_libraries(test_remove PRIVATE btrfind_core Qt6::Test)
+    add_test(NAME test_remove COMMAND test_remove WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
