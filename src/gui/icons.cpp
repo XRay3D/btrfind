@@ -5,18 +5,20 @@
 #include <QMimeDatabase>
 #include <QObject>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 
 QIcon icon_for(const QString& name, bool dir) {
     static QHash<QString, QIcon> cache;
     static QMimeDatabase db;
     if (dir) {
-        static const QIcon folder = QIcon::fromTheme(QStringLiteral("folder"),
+        static const QIcon folder = QIcon::fromTheme(u"folder"_s,
                                                      QFileIconProvider().icon(QFileIconProvider::Folder));
         return folder;
     }
-    const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
-    const QString key = dot > 0 ? name.mid(dot + 1).toLower() : QStringLiteral("#") + name.toLower();
+    const qsizetype dot = name.lastIndexOf(u'.');
+    const QString key = dot > 0 ? name.mid(dot + 1).toLower() : u"#"_s + name.toLower();
     auto it = cache.constFind(key);
     if (it != cache.constEnd()) return *it;
     const QMimeType mt = db.mimeTypeForFile(name, QMimeDatabase::MatchExtension);
@@ -32,8 +34,8 @@ QString type_for(const QString& name, bool dir) {
     if (dir) return QObject::tr("Папка");
     static QHash<QString, QString> cache;
     static QMimeDatabase db;
-    const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
-    const QString key = dot > 0 ? name.mid(dot + 1).toLower() : QStringLiteral("#") + name.toLower();
+    const qsizetype dot = name.lastIndexOf(u'.');
+    const QString key = dot > 0 ? name.mid(dot + 1).toLower() : u"#"_s + name.toLower();
     auto it = cache.constFind(key);
     if (it != cache.constEnd()) return *it;
     const QMimeType mt = db.mimeTypeForFile(name, QMimeDatabase::MatchExtension);

@@ -16,10 +16,12 @@
 #include <QTimer>
 #include <QTranslator>
 
+using namespace Qt::StringLiterals;
+
 namespace {
 
 // Одно окно на пользователя: повторный запуск передаёт аргументы уже открытому окну.
-QString instance_name() { return QStringLiteral("btrfind-gui-%1").arg(getuid()); }
+QString instance_name() { return u"btrfind-gui-%1"_s.arg(getuid()); }
 
 bool forward_to_running(const QString& folder, const QString& query, bool has_query) {
     QLocalSocket s;
@@ -40,23 +42,23 @@ int main(int argc, char** argv) {
     if (bx::is_cli_invocation(argc, argv)) return bx::run_cli(argc, argv);
 
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("btrfind"));
-    QApplication::setOrganizationName(QStringLiteral("btrfind"));
-    QApplication::setApplicationVersion(QStringLiteral(BTRFIND_VERSION));
-    QApplication::setDesktopFileName(QStringLiteral("btrfind"));
+    QApplication::setApplicationName(u"btrfind"_s);
+    QApplication::setOrganizationName(u"btrfind"_s);
+    QApplication::setApplicationVersion(QString::fromLatin1(BTRFIND_VERSION));
+    QApplication::setDesktopFileName(u"btrfind"_s);
     static QTranslator qt_tr;  // «Отмена», «Да» и т.п. в стандартных кнопках Qt
-    if (qt_tr.load(QLocale(), QStringLiteral("qtbase"), QStringLiteral("_"),
+    if (qt_tr.load(QLocale(), u"qtbase"_s, u"_"_s,
                    QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
         QApplication::installTranslator(&qt_tr);
 
     QCommandLineParser p;
-    p.setApplicationDescription(QStringLiteral("Мгновенный поиск файлов на btrfs"));
-    QCommandLineOption in(QStringLiteral("in"), QStringLiteral("Искать только в папке."), QStringLiteral("dir"));
-    QCommandLineOption socket(QStringLiteral("socket"), QStringLiteral("Сокет демона."), QStringLiteral("path"),
-                              QString::fromLatin1(bx::proto::kDefaultSocket));
-    QCommandLineOption newwin(QStringLiteral("new-window"), QStringLiteral("Открыть отдельное окно (не передавать запрос открытому)."));
+    p.setApplicationDescription(u"Мгновенный поиск файлов на btrfs"_s);
+    QCommandLineOption in(u"in"_s, u"Искать только в папке."_s, u"dir"_s);
+    QCommandLineOption socket(u"socket"_s, u"Сокет демона."_s, u"path"_s,
+                              bx::proto::kDefaultSocket);
+    QCommandLineOption newwin(u"new-window"_s, u"Открыть отдельное окно (не передавать запрос открытому)."_s);
     p.addOptions({in, socket, newwin});
-    p.addPositionalArgument(QStringLiteral("запрос"), QStringLiteral("Начальный запрос."));
+    p.addPositionalArgument(u"запрос"_s, u"Начальный запрос."_s);
     p.process(app);
 
     QString folder = p.value(in);
@@ -64,7 +66,7 @@ int main(int argc, char** argv) {
         QFileInfo fi(folder);
         folder = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();  // для файла — его папка
     }
-    const QString query = p.positionalArguments().join(QLatin1Char(' '));
+    const QString query = p.positionalArguments().join(u' ');
     const bool has_query = !p.positionalArguments().isEmpty();
 
     if (!p.isSet(newwin) && forward_to_running(folder, query, has_query)) return 0;
@@ -96,7 +98,7 @@ int main(int argc, char** argv) {
     // Для снимков экрана (README): набор видимых столбцов из окружения.
     if (const QString cols = qEnvironmentVariable("BTRFIND_COLUMNS"); !cols.isEmpty()) {
         QList<int> list;
-        for (const QString& c : cols.split(QLatin1Char(','))) list << c.toInt();
+        for (const QString& c : cols.split(u',')) list << c.toInt();
         w.setVisibleColumns(list);
     }
     if (!folder.isEmpty()) w.setFolder(folder);
@@ -105,7 +107,7 @@ int main(int argc, char** argv) {
     client.connectToDaemon();
     // Отладка/проверка: снимок окна и выход (BTRFIND_SCREENSHOT=/путь/к/файлу.png).
     if (const QString size = qEnvironmentVariable("BTRFIND_SCREENSHOT_SIZE"); !size.isEmpty())  // например 1100x680
-        w.resize(size.section(QLatin1Char('x'), 0, 0).toInt(), size.section(QLatin1Char('x'), 1, 1).toInt());
+        w.resize(size.section(u'x', 0, 0).toInt(), size.section(u'x', 1, 1).toInt());
     if (const QString shot = qEnvironmentVariable("BTRFIND_SCREENSHOT"); !shot.isEmpty())
         QTimer::singleShot(qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") > 0 ? qEnvironmentVariableIntValue("BTRFIND_SCREENSHOT_DELAY") : 3000, &w, [&w, shot] {
             w.grab().save(shot);

@@ -8,6 +8,8 @@
 #include <QPainter>
 #include <QTextLayout>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 
 ThumbDelegate::ThumbDelegate(ThumbnailProvider* provider, QObject* parent)
@@ -35,7 +37,7 @@ void ThumbDelegate::paint(QPainter* p, const QStyleOptionViewItem& option, const
     const QString name = index.data(ResultModel::NameRole).toString();
     if (name.isEmpty()) {  // строка ещё не загружена
         p->setPen(opt.palette.color(QPalette::Disabled, QPalette::Text));
-        p->drawText(img, Qt::AlignCenter, QStringLiteral("…"));
+        p->drawText(img, Qt::AlignCenter, u"…"_s);
         return;
     }
     const bool dir = index.data(ResultModel::IsDirRole).toBool();

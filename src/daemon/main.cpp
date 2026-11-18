@@ -11,6 +11,8 @@
 #include <QSocketNotifier>
 #include <QtDebug>
 
+using namespace Qt::StringLiterals;
+
 int main(int argc, char** argv) {
     // Сигналы завершения — через signalfd в цикл событий (маска наследуется всеми потоками).
     sigset_t mask;
@@ -20,23 +22,23 @@ int main(int argc, char** argv) {
     sigprocmask(SIG_BLOCK, &mask, nullptr);
     signal(SIGPIPE, SIG_IGN);
 
-    qSetMessagePattern(QStringLiteral("%{if-warning}W: %{endif}%{if-critical}E: %{endif}%{message}"));
+    qSetMessagePattern(u"%{if-warning}W: %{endif}%{if-critical}E: %{endif}%{message}"_s);
     QCoreApplication app(argc, argv);
-    QCoreApplication::setApplicationName(QStringLiteral("btrfindd"));
-    QCoreApplication::setApplicationVersion(QStringLiteral(BTRFIND_VERSION));
+    QCoreApplication::setApplicationName(u"btrfindd"_s);
+    QCoreApplication::setApplicationVersion(QString::fromLatin1(BTRFIND_VERSION));
 
     QCommandLineParser p;
-    p.setApplicationDescription(QStringLiteral("Демон индексации btrfs для мгновенного поиска файлов"));
+    p.setApplicationDescription(u"Демон индексации btrfs для мгновенного поиска файлов"_s);
     p.addHelpOption();
     p.addVersionOption();
-    QCommandLineOption socket({QStringLiteral("s"), QStringLiteral("socket")}, QStringLiteral("Путь unix-сокета."),
-                              QStringLiteral("path"), QString::fromLatin1(bx::proto::kDefaultSocket));
-    QCommandLineOption state({QStringLiteral("d"), QStringLiteral("state-dir")},
-                             QStringLiteral("Каталог для сохранённых индексов."), QStringLiteral("dir"),
-                             QStringLiteral("/var/lib/btrfind"));
-    QCommandLineOption nosave(QStringLiteral("no-save"), QStringLiteral("Не сохранять и не загружать индексы."));
-    QCommandLineOption interval(QStringLiteral("save-interval"), QStringLiteral("Интервал сохранения, минут."),
-                                QStringLiteral("min"), QStringLiteral("10"));
+    QCommandLineOption socket({u"s"_s, u"socket"_s}, u"Путь unix-сокета."_s,
+                              u"path"_s, bx::proto::kDefaultSocket);
+    QCommandLineOption state({u"d"_s, u"state-dir"_s},
+                             u"Каталог для сохранённых индексов."_s, u"dir"_s,
+                             u"/var/lib/btrfind"_s);
+    QCommandLineOption nosave(u"no-save"_s, u"Не сохранять и не загружать индексы."_s);
+    QCommandLineOption interval(u"save-interval"_s, u"Интервал сохранения, минут."_s,
+                                u"min"_s, u"10"_s);
     p.addOptions({socket, state, nosave, interval});
     p.process(app);
 

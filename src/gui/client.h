@@ -11,12 +11,14 @@
 
 namespace bx {
 
+using namespace Qt::StringLiterals;
+
 struct SearchOpts {
     QString filter;
     bool case_sensitive = false;
     bool regex = false;
     bool path = false;
-    QString sort = QStringLiteral("name");
+    QString sort = u"name"_s;
     bool desc = false;
 };
 

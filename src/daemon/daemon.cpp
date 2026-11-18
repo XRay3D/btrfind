@@ -16,6 +16,8 @@
 #include <mutex>
 #include <set>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 
 Daemon::Daemon(Options o, QObject* parent) : QObject(parent), o_(std::move(o)) {
@@ -30,7 +32,7 @@ Daemon::~Daemon() {
 
 void Daemon::log(Volume* v, const std::string& msg) {
     if (v)
-        qInfo().noquote() << QStringLiteral("[%1]").arg(QString::fromStdString(v->path)) << QString::fromStdString(msg);
+        qInfo().noquote() << u"[%1]"_s.arg(QString::fromStdString(v->path)) << QString::fromStdString(msg);
     else
         qInfo().noquote() << QString::fromStdString(msg);
 }
@@ -283,18 +285,18 @@ QCborMap Daemon::status() {
             std::shared_lock lk(v->mu, std::try_to_lock);
             if (lk.owns_lock()) entries = v->index.live;
         }
-        vols.append(QCborMap{{QStringLiteral("path"), QString::fromStdString(v->path)},
-                             {QStringLiteral("subvol"), qint64(v->subvol)},
-                             {QStringLiteral("uuid"), QString::fromStdString(uuid_str(v->uuid))},
-                             {QStringLiteral("entries"), qint64(entries)},
-                             {QStringLiteral("state"), QString::fromLatin1(state_name(v->state))},
-                             {QStringLiteral("generation"), qint64(v->generation.load())},
-                             {QStringLiteral("live"), watcher_->watching(v->uuid)}});
+        vols.append(QCborMap{{u"path"_s, QString::fromStdString(v->path)},
+                             {u"subvol"_s, qint64(v->subvol)},
+                             {u"uuid"_s, QString::fromStdString(uuid_str(v->uuid))},
+                             {u"entries"_s, qint64(entries)},
+                             {u"state"_s, QString::fromLatin1(state_name(v->state))},
+                             {u"generation"_s, qint64(v->generation.load())},
+                             {u"live"_s, watcher_->watching(v->uuid)}});
     }
-    return QCborMap{{QStringLiteral("op"), QStringLiteral("status")},
-                    {QStringLiteral("version"), QStringLiteral(BTRFIND_VERSION)},
-                    {QStringLiteral("volumes"), vols},
-                    {QStringLiteral("events"), qint64(watcher_->stats.events)}};
+    return QCborMap{{u"op"_s, u"status"_s},
+                    {u"version"_s, QString::fromLatin1(BTRFIND_VERSION)},
+                    {u"volumes"_s, vols},
+                    {u"events"_s, qint64(watcher_->stats.events)}};
 }
 
 }  // namespace bx

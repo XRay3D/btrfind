@@ -13,11 +13,13 @@
 #include <cstring>
 #include <map>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 
 QString join(const QString& dir, const QString& name) {
-    return dir == QLatin1String("/") ? QLatin1Char('/') + name : dir + QLatin1Char('/') + name;
+    return dir == u"/"_s ? u'/' + name : dir + u'/' + name;
 }
 
 bool exists(const QString& path) {
@@ -30,13 +32,13 @@ QList<int> referenced_groups(const QString& f, bool regex) {
     QList<int> out;
     for (qsizetype i = 0; i + 1 < f.size(); ++i) {
         const QChar c = f[i], n = f[i + 1];
-        if (c == QLatin1Char('%')) {
-            if (n == QLatin1Char('%')) {
+        if (c == u'%') {
+            if (n == u'%') {
                 ++i;
                 continue;
             }
-            if (n >= QLatin1Char('1') && n <= QLatin1Char('9')) out << n.digitValue();
-        } else if (regex && (c == QLatin1Char('\\') || c == QLatin1Char('$')) && n.isDigit()) {
+            if (n >= u'1' && n <= u'9') out << n.digitValue();
+        } else if (regex && (c == u'\\' || c == u'$') && n.isDigit()) {
             out << n.digitValue();
             ++i;
         }
@@ -60,7 +62,7 @@ int do_rename(const QString& from, const QString& to) {
 }
 
 QString err_text(const QString& from, const QString& to_name) {
-    return QStringLiteral("%1 → %2: %3").arg(from, to_name, QString::fromLocal8Bit(strerror(errno)));
+    return u"%1 → %2: %3"_s.arg(from, to_name, QString::fromLocal8Bit(strerror(errno)));
 }
 
 RenameResult run(const std::vector<PlanItem>& plan, bool deepest_first) {
@@ -72,7 +74,7 @@ RenameResult run(const std::vector<PlanItem>& plan, bool deepest_first) {
     std::map<int, std::vector<Op>> levels;
     for (const PlanItem& it : plan)
         if (it.status == RenameStatus::Rename)
-            levels[it.dir == QLatin1String("/") ? 0 : int(it.dir.count(QLatin1Char('/')))].push_back(
+            levels[it.dir == u"/"_s ? 0 : int(it.dir.count(u'/'))].push_back(
                 {it.dir, it.old_name, it.new_name, {}});
 
     RenameResult res;
@@ -84,7 +86,7 @@ RenameResult run(const std::vector<PlanItem>& plan, bool deepest_first) {
         for (Op& op : ops) {
             if (!olds.contains(join(op.dir, op.fin))) continue;
             for (;;) {
-                op.tmp = QStringLiteral(".btrfind-tmp-%1-%2").arg(getpid()).arg(k++);
+                op.tmp = u".btrfind-tmp-%1-%2"_s.arg(getpid()).arg(k++);
                 if (do_rename(join(op.dir, op.old_name), join(op.dir, op.tmp)) == 0) break;
                 if (errno != EEXIST) {
                     res.errors << err_text(join(op.dir, op.old_name), op.fin);
@@ -111,7 +113,7 @@ RenameResult run(const std::vector<PlanItem>& plan, bool deepest_first) {
             }
             res.errors << err_text(join(op.dir, op.old_name), op.fin);
             if (do_rename(join(op.dir, op.tmp), join(op.dir, op.old_name)) != 0)
-                res.errors << QStringLiteral("файл остался под временным именем %1").arg(join(op.dir, op.tmp));
+                res.errors << u"файл остался под временным именем %1"_s.arg(join(op.dir, op.tmp));
         }
     };
     if (deepest_first)
@@ -144,17 +146,17 @@ bool RenamePattern::compile(const QString& old_fmt, const QString& new_fmt, cons
         };
         for (qsizetype i = 0; i < old_fmt.size(); ++i) {
             const QChar c = old_fmt[i];
-            if (c == QLatin1Char('%') && i + 1 < old_fmt.size()) {
+            if (c == u'%' && i + 1 < old_fmt.size()) {
                 const QChar n = old_fmt[i + 1];
-                if (n == QLatin1Char('%')) {
-                    lit += QLatin1Char('%');
+                if (n == u'%') {
+                    lit += u'%';
                     ++i;
                     continue;
                 }
-                if (n >= QLatin1Char('1') && n <= QLatin1Char('9')) {
+                if (n >= u'1' && n <= u'9') {
                     flush();
                     const int d = n.digitValue();
-                    pat += seen[d] ? QStringLiteral("\\k<g%1>").arg(d) : QStringLiteral("(?<g%1>.*?)").arg(d);
+                    pat += seen[d] ? u"\\k<g%1>"_s.arg(d) : u"(?<g%1>.*?)"_s.arg(d);
                     seen[d] = true;
                     ++i;
                     continue;
@@ -166,13 +168,13 @@ bool RenamePattern::compile(const QString& old_fmt, const QString& new_fmt, cons
     }
     re_ = QRegularExpression(QRegularExpression::anchoredPattern(pat), po);
     if (!re_.isValid()) {
-        err = QStringLiteral("старый формат: %1").arg(re_.errorString());
+        err = u"старый формат: %1"_s.arg(re_.errorString());
         return false;
     }
     for (int g : referenced_groups(new_fmt, regex_)) {
         if (regex_ ? g > re_.captureCount() : (g < 1 || !seen[g])) {
-            err = regex_ ? QStringLiteral("в выражении нет группы %1").arg(g)
-                         : QStringLiteral("в старом формате нет %%1").arg(g);
+            err = regex_ ? u"в выражении нет группы %1"_s.arg(g)
+                         : u"в старом формате нет %%1"_s.arg(g);
             return false;
         }
     }
@@ -183,40 +185,40 @@ bool RenamePattern::compile(const QString& old_fmt, const QString& new_fmt, cons
 bool RenamePattern::apply(const QString& name, int counter, QString& out) const {
     const QRegularExpressionMatch m = re_.match(name);
     if (!m.hasMatch()) return false;
-    auto group = [&](int d) { return regex_ ? m.captured(d) : m.captured(QStringLiteral("g%1").arg(d)); };
+    auto group = [&](int d) { return regex_ ? m.captured(d) : m.captured(u"g%1"_s.arg(d)); };
     const QString& f = new_fmt_;
     out.clear();
     for (qsizetype i = 0; i < f.size();) {
         const QChar c = f[i];
-        if (c == QLatin1Char('%') && i + 1 < f.size()) {
+        if (c == u'%' && i + 1 < f.size()) {
             const QChar n = f[i + 1];
-            if (n == QLatin1Char('%')) {
-                out += QLatin1Char('%');
+            if (n == u'%') {
+                out += u'%';
                 i += 2;
                 continue;
             }
-            if (n == QLatin1Char('n')) {
+            if (n == u'n') {
                 out += QString::number(counter);
                 i += 2;
                 continue;
             }
-            if (n == QLatin1Char('0')) {  // %03n
+            if (n == u'0') {  // %03n
                 qsizetype j = i + 1;
                 while (j < f.size() && f[j].isDigit()) ++j;
-                if (j < f.size() && f[j] == QLatin1Char('n')) {
+                if (j < f.size() && f[j] == u'n') {
                     const int width = f.mid(i + 1, j - i - 1).toInt();
-                    out += QStringLiteral("%1").arg(counter, width, 10, QLatin1Char('0'));
+                    out += u"%1"_s.arg(counter, width, 10, u'0');
                     i = j + 1;
                     continue;
                 }
             }
-            if (n >= QLatin1Char('1') && n <= QLatin1Char('9')) {
+            if (n >= u'1' && n <= u'9') {
                 out += group(n.digitValue());
                 i += 2;
                 continue;
             }
         }
-        if (regex_ && (c == QLatin1Char('\\') || c == QLatin1Char('$')) && i + 1 < f.size() && f[i + 1].isDigit()) {
+        if (regex_ && (c == u'\\' || c == u'$') && i + 1 < f.size() && f[i + 1].isDigit()) {
             out += m.captured(f[i + 1].digitValue());
             i += 2;
             continue;
@@ -228,8 +230,8 @@ bool RenamePattern::apply(const QString& name, int counter, QString& out) const 
 }
 
 QString suggest_old_format(const QStringList& names) {
-    auto esc = [](QString s) { return s.replace(QLatin1Char('%'), QStringLiteral("%%")); };
-    if (names.isEmpty()) return QStringLiteral("%1");
+    auto esc = [](QString s) { return s.replace(u'%', u"%%"_s); };
+    if (names.isEmpty()) return u"%1"_s;
     qsizetype minlen = names[0].size();
     for (const QString& n : names) minlen = std::min(minlen, n.size());
     qsizetype pre = 0;
@@ -259,36 +261,36 @@ QString suggest_old_format(const QStringList& names) {
     auto digit_at = [&](qsizetype i) { return i >= 0 && i < names[0].size() && names[0][i].isDigit(); };
     while (pre > 0 && digit_at(pre - 1)) --pre;
     while (suf > 0 && digit_at(names[0].size() - suf)) --suf;
-    return esc(names[0].left(pre)) + QStringLiteral("%1") + esc(names[0].right(suf));
+    return esc(names[0].left(pre)) + u"%1"_s + esc(names[0].right(suf));
 }
 
 // ---------------------------------------------------------------- план
 
 QString name_problem(const QString& n) {
-    if (n.isEmpty()) return QStringLiteral("пустое имя");
-    if (n.contains(QLatin1Char('/'))) return QStringLiteral("«/» в имени");
-    if (n.contains(QChar(0))) return QStringLiteral("недопустимый символ");
-    if (n == QLatin1String(".") || n == QLatin1String("..")) return QStringLiteral("недопустимое имя");
-    if (QFile::encodeName(n).size() > 255) return QStringLiteral("имя длиннее 255 байт");
+    if (n.isEmpty()) return u"пустое имя"_s;
+    if (n.contains(u'/')) return u"«/» в имени"_s;
+    if (n.contains(QChar(0))) return u"недопустимый символ"_s;
+    if (n == u"."_s || n == u".."_s) return u"недопустимое имя"_s;
+    if (QFile::encodeName(n).size() > 255) return u"имя длиннее 255 байт"_s;
     return {};
 }
 
 QString status_text(const PlanItem& it) {
     switch (it.status) {
-        case RenameStatus::Rename: return QStringLiteral("будет переименован");
-        case RenameStatus::Unchanged: return QStringLiteral("без изменений");
-        case RenameStatus::NoMatch: return QStringLiteral("не подходит под шаблон");
+        case RenameStatus::Rename: return u"будет переименован"_s;
+        case RenameStatus::Unchanged: return u"без изменений"_s;
+        case RenameStatus::NoMatch: return u"не подходит под шаблон"_s;
         case RenameStatus::Invalid: return it.message;
-        case RenameStatus::Duplicate: return QStringLiteral("повторяется новое имя");
-        case RenameStatus::Exists: return QStringLiteral("файл с таким именем уже есть");
+        case RenameStatus::Duplicate: return u"повторяется новое имя"_s;
+        case RenameStatus::Exists: return u"файл с таким именем уже есть"_s;
     }
     return {};
 }
 
 namespace {
 void split(const QString& path, QString& dir, QString& name) {
-    const qsizetype s = path.lastIndexOf(QLatin1Char('/'));
-    dir = s <= 0 ? QStringLiteral("/") : path.left(s);
+    const qsizetype s = path.lastIndexOf(u'/');
+    dir = s <= 0 ? u"/"_s : path.left(s);
     name = path.mid(s + 1);
 }
 

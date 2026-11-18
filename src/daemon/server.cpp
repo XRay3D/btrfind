@@ -19,6 +19,8 @@
 #include <mutex>
 #include <shared_mutex>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 
@@ -76,31 +78,31 @@ void Session::on_ready_read() {
 }
 
 void Session::handle(const QCborMap& m) {
-    const QString op = m.value("op").toString();
-    if (op == "search")
+    const QString op = m.value(u"op"_s).toString();
+    if (op == u"search"_s)
         start_search(m);
-    else if (op == "rows")
+    else if (op == u"rows"_s)
         send_rows(m);
-    else if (op == "sum")
+    else if (op == u"sum"_s)
         send_sum(m);
-    else if (op == "status")
+    else if (op == u"status"_s)
         push(d_.status());
 }
 
 void Session::start_search(const QCborMap& m) {
-    const qint64 id = m.value("id").toInteger();
+    const qint64 id = m.value(u"id"_s).toInteger();
     latest_id_ = id;
     if (cancel_) cancel_->store(true);  // предыдущий поиск больше не нужен
     cancel_ = std::make_shared<std::atomic<bool>>(false);
 
     QueryOptions qo;
-    qo.case_sensitive = m.value("case").toBool();
-    qo.regex = m.value("regex").toBool();
-    qo.match_path = m.value("path").toBool();
-    const std::string text = m.value("q").toString().toStdString();
-    const std::string filter = m.value("filter").toString().toStdString();  // доп. условия (пресет GUI)
-    const SortKey key = sort_key_from(m.value("sort").toString().toStdString());
-    const bool desc = m.value("desc").toBool();
+    qo.case_sensitive = m.value(u"case"_s).toBool();
+    qo.regex = m.value(u"regex"_s).toBool();
+    qo.match_path = m.value(u"path"_s).toBool();
+    const std::string text = m.value(u"q"_s).toString().toStdString();
+    const std::string filter = m.value(u"filter"_s).toString().toStdString();  // доп. условия (пресет GUI)
+    const SortKey key = sort_key_from(m.value(u"sort"_s).toString().toStdString());
+    const bool desc = m.value(u"desc"_s).toBool();
     const Access access = access_;
     auto cancel = cancel_;
     QPointer<Session> self(this);
@@ -108,7 +110,7 @@ void Session::start_search(const QCborMap& m) {
 
     QThreadPool::globalInstance()->start([=] {
         const auto t0 = std::chrono::steady_clock::now();
-        QCborMap reply{{QStringLiteral("op"), QStringLiteral("result")}, {QStringLiteral("id"), id}};
+        QCborMap reply{{u"op"_s, u"result"_s}, {u"id"_s, id}};
         std::vector<Ref> refs;
         std::vector<uint64_t> epochs;
         {
@@ -135,7 +137,7 @@ void Session::start_search(const QCborMap& m) {
                 for (auto& g : f.groups) q.groups.push_back(std::move(g));
             }
             if (!q.ok()) {
-                reply.insert(QStringLiteral("error"), QString::fromStdString(q.error));
+                reply.insert(u"error"_s, QString::fromStdString(q.error));
             } else {
                 refs = run_search(q, svs, &access, cancel.get(), nullptr);
                 if (!cancel->load()) {
@@ -143,16 +145,16 @@ void Session::start_search(const QCborMap& m) {
                     std::vector<const Index*> by_vol(d->volumes.size(), nullptr);
                     for (const auto& sv : svs) by_vol[sv.vol] = sv.ix;
                     const Totals t = sum_results(refs, by_vol, 0, refs.size());
-                    reply.insert(QStringLiteral("bytes"), qint64(t.bytes));
-                    reply.insert(QStringLiteral("files"), qint64(t.files));
-                    reply.insert(QStringLiteral("dirs"), qint64(t.dirs));
+                    reply.insert(u"bytes"_s, qint64(t.bytes));
+                    reply.insert(u"files"_s, qint64(t.files));
+                    reply.insert(u"dirs"_s, qint64(t.dirs));
                 }
             }
         }
         if (cancel->load()) return;
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        reply.insert(QStringLiteral("total"), qint64(refs.size()));
-        reply.insert(QStringLiteral("ms"), ms);
+        reply.insert(u"total"_s, qint64(refs.size()));
+        reply.insert(u"ms"_s, ms);
         QMetaObject::invokeMethod(
             d,  // контекст — демон (живёт всегда); сессия могла уже закрыться
             [self, id, reply, refs = std::move(refs), epochs = std::move(epochs)]() mutable {
@@ -168,9 +170,9 @@ void Session::start_search(const QCborMap& m) {
 
 void Session::send_sum(const QCborMap& m) {
     // Размер выделенного: диапазоны строк последнего результата [from, to).
-    const qint64 id = m.value("id").toInteger();
-    QCborMap reply{{QStringLiteral("op"), QStringLiteral("sum")}, {QStringLiteral("id"), id},
-                   {QStringLiteral("tag"), m.value("tag")}};
+    const qint64 id = m.value(u"id"_s).toInteger();
+    QCborMap reply{{u"op"_s, u"sum"_s}, {u"id"_s, id},
+                   {u"tag"_s, m.value(u"tag"_s)}};
     if (id == result_id_) {
         std::shared_lock vl(d_.volumes_mu);
         std::vector<std::shared_lock<std::shared_mutex>> locks;
@@ -180,7 +182,7 @@ void Session::send_sum(const QCborMap& m) {
             if (v->id < epochs_.size() && v->index.epoch == epochs_[v->id]) by_vol[v->id] = &v->index;
         }
         Totals t;
-        for (const QCborValue& r : m.value("ranges").toArray()) {
+        for (const QCborValue& r : m.value(u"ranges"_s).toArray()) {
             const QCborArray a = r.toArray();
             const Totals p = sum_results(results_, by_vol, size_t(std::max<qint64>(0, a.at(0).toInteger())),
                                          size_t(std::max<qint64>(0, a.at(1).toInteger())));
@@ -188,19 +190,19 @@ void Session::send_sum(const QCborMap& m) {
             t.files += p.files;
             t.dirs += p.dirs;
         }
-        reply.insert(QStringLiteral("bytes"), qint64(t.bytes));
-        reply.insert(QStringLiteral("files"), qint64(t.files));
-        reply.insert(QStringLiteral("dirs"), qint64(t.dirs));
+        reply.insert(u"bytes"_s, qint64(t.bytes));
+        reply.insert(u"files"_s, qint64(t.files));
+        reply.insert(u"dirs"_s, qint64(t.dirs));
     }
     push(reply);
 }
 
 void Session::send_rows(const QCborMap& m) {
-    const qint64 id = m.value("id").toInteger();
-    const qint64 from = std::max<qint64>(0, m.value("from").toInteger());
-    const qint64 count = std::clamp<qint64>(m.value("count").toInteger(), 0, 5000);
-    QCborMap reply{{QStringLiteral("op"), QStringLiteral("rows")}, {QStringLiteral("id"), id},
-                   {QStringLiteral("from"), from}};
+    const qint64 id = m.value(u"id"_s).toInteger();
+    const qint64 from = std::max<qint64>(0, m.value(u"from"_s).toInteger());
+    const qint64 count = std::clamp<qint64>(m.value(u"count"_s).toInteger(), 0, 5000);
+    QCborMap reply{{u"op"_s, u"rows"_s}, {u"id"_s, id},
+                   {u"from"_s, from}};
     QCborArray rows;
     if (id == result_id_) {
         std::shared_lock vl(d_.volumes_mu);
@@ -228,7 +230,7 @@ void Session::send_rows(const QCborMap& m) {
                                    qint64(e.gid)});
         }
     }
-    reply.insert(QStringLiteral("rows"), rows);
+    reply.insert(u"rows"_s, rows);
     push(reply);
 }
 
@@ -238,7 +240,7 @@ Server::Server(Daemon& d, QObject* parent) : QObject(parent), d_(d) {
     changed_timer_.setSingleShot(true);
     changed_timer_.setInterval(300);
     connect(&changed_timer_, &QTimer::timeout, this, [this] {
-        const QCborMap m{{QStringLiteral("op"), QStringLiteral("changed")}};
+        const QCborMap m{{u"op"_s, u"changed"_s}};
         for (auto& s : sessions_)
             if (s) s->push(m);
         std::erase_if(sessions_, [](const QPointer<Session>& s) { return s.isNull(); });
@@ -250,7 +252,7 @@ Server::Server(Daemon& d, QObject* parent) : QObject(parent), d_(d) {
 
 bool Server::listen(const QString& path, QString& err) {
     if (path.toLocal8Bit().size() >= 108) {  // sizeof(sockaddr_un::sun_path)
-        err = QStringLiteral("путь сокета длиннее 107 байт");
+        err = u"путь сокета длиннее 107 байт"_s;
         return false;
     }
     QDir().mkpath(QFileInfo(path).absolutePath());

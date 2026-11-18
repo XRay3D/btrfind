@@ -22,7 +22,8 @@ class QIODevice;
 
 namespace bx::proto {
 
-inline constexpr const char* kDefaultSocket = "/run/btrfind/btrfind.sock";
+using namespace Qt::StringLiterals;
+inline const QString kDefaultSocket = u"/run/btrfind/btrfind.sock"_s;
 inline constexpr quint32 kMaxFrame = 64u << 20;
 
 QByteArray encode(const QCborMap& m);

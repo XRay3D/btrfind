@@ -12,6 +12,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 
@@ -22,7 +24,7 @@ void show_errors(QWidget* parent, const RenameResult& r) {
     QMessageBox box(QMessageBox::Warning, QObject::tr("Переименование"),
                     QObject::tr("Переименовано: %1, ошибок: %2.").arg(r.done.size()).arg(r.errors.size()),
                     QMessageBox::Ok, parent);
-    box.setDetailedText(r.errors.join(QLatin1Char('\n')));
+    box.setDetailedText(r.errors.join(u'\n'));
     box.exec();
 }
 
@@ -33,7 +35,7 @@ RenameDialog::RenameDialog(const QStringList& paths, QWidget* parent) : QDialog(
     auto* lay = new QVBoxLayout(this);
 
     QStringList names;
-    for (const QString& p : paths) names << p.mid(p.lastIndexOf(QLatin1Char('/')) + 1);
+    for (const QString& p : paths) names << p.mid(p.lastIndexOf(u'/') + 1);
     const QString fmt = suggest_old_format(names);
 
     auto* form = new QFormLayout;
@@ -51,8 +53,8 @@ RenameDialog::RenameDialog(const QStringList& paths, QWidget* parent) : QDialog(
     regex_ = new QCheckBox(tr("Регулярное выражение"), this);
     case_ = new QCheckBox(tr("С учётом регистра"), this);
     QSettings s;
-    regex_->setChecked(s.value(QStringLiteral("rename/regex")).toBool());
-    case_->setChecked(s.value(QStringLiteral("rename/case")).toBool());
+    regex_->setChecked(s.value(u"rename/regex"_s).toBool());
+    case_->setChecked(s.value(u"rename/case"_s).toBool());
     auto* help = new QLabel(tr("<small>%1…%9 — части имени · %n, %03n — номер · %% — знак %</small>"), this);
     opts->addWidget(regex_);
     opts->addWidget(case_);
@@ -104,7 +106,7 @@ void RenameDialog::updatePreview() {
     preview_->clear();
     if (!p.compile(old_->text(), new_->text(), o, err)) {
         plan_.clear();
-        summary_->setText(QStringLiteral("<span style='color:#d33'>%1</span>").arg(err.toHtmlEscaped()));
+        summary_->setText(u"<span style='color:#d33'>%1</span>"_s.arg(err.toHtmlEscaped()));
         ok_->setEnabled(false);
         return;
     }
@@ -137,15 +139,15 @@ void RenameDialog::accept() {
     int errors = 0;
     if (plan_summary(plan_, &errors) == 0 || errors) return;
     QSettings s;
-    s.setValue(QStringLiteral("rename/regex"), regex_->isChecked());
-    s.setValue(QStringLiteral("rename/case"), case_->isChecked());
+    s.setValue(u"rename/regex"_s, regex_->isChecked());
+    s.setValue(u"rename/case"_s, case_->isChecked());
     result_ = execute_rename(plan_);
     show_errors(this, result_);
     QDialog::accept();
 }
 
 bool rename_single(QWidget* parent, const QString& path, bool is_dir, RenameResult& out) {
-    const QString old = path.mid(path.lastIndexOf(QLatin1Char('/')) + 1);
+    const QString old = path.mid(path.lastIndexOf(u'/') + 1);
     QDialog d(parent);
     d.setWindowTitle(is_dir ? QObject::tr("Переименовать папку") : QObject::tr("Переименовать файл"));
     auto* lay = new QVBoxLayout(&d);
@@ -164,14 +166,14 @@ bool rename_single(QWidget* parent, const QString& path, bool is_dir, RenameResu
     auto check = [&] {
         const auto plan = plan_single(path, edit->text());
         const PlanItem& it = plan[0];
-        status->setText(it.is_error() ? QStringLiteral("<span style='color:#d33'>%1</span>").arg(status_text(it))
+        status->setText(it.is_error() ? u"<span style='color:#d33'>%1</span>"_s.arg(status_text(it))
                                       : QString());
         ok->setEnabled(it.status == RenameStatus::Rename);
     };
     QObject::connect(edit, &QLineEdit::textChanged, &d, check);
     check();
     // Выделить имя без расширения (как в файловых менеджерах); у папок и «.bashrc» — всё имя.
-    const qsizetype dot = old.lastIndexOf(QLatin1Char('.'));
+    const qsizetype dot = old.lastIndexOf(u'.');
     edit->setSelection(0, (!is_dir && dot > 0) ? dot : old.size());
     d.resize(480, d.sizeHint().height());
 

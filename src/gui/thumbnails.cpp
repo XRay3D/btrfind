@@ -11,6 +11,8 @@
 #include <KIO/PreviewJob>
 #endif
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 constexpr int kBatch = 32;
@@ -32,7 +34,7 @@ ThumbnailProvider::ThumbnailProvider(QObject* parent) : QObject(parent) {
 }
 
 QString ThumbnailProvider::key(const QString& path, qint64 mtime, int size) {
-    return QString::number(size) + QLatin1Char('|') + QString::number(mtime) + QLatin1Char('|') + path;
+    return QString::number(size) + u'|' + QString::number(mtime) + u'|' + path;
 }
 
 QPixmap ThumbnailProvider::get(const QString& path, qint64 mtime, int size, qreal dpr) {

@@ -15,6 +15,8 @@
 #include <QMimeData>
 #include <QUrl>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 namespace {
 
@@ -43,24 +45,24 @@ QString group_name(quint32 gid) {
 }
 
 QString perm_string(quint32 m) {
-    QString s(10, QLatin1Char('-'));
-    if (S_ISDIR(m)) s[0] = QLatin1Char('d');
-    else if (S_ISLNK(m)) s[0] = QLatin1Char('l');
-    else if (S_ISSOCK(m)) s[0] = QLatin1Char('s');
-    else if (S_ISFIFO(m)) s[0] = QLatin1Char('p');
-    else if (S_ISCHR(m)) s[0] = QLatin1Char('c');
-    else if (S_ISBLK(m)) s[0] = QLatin1Char('b');
-    const char* rwx = "rwxrwxrwx";
+    QString s(10, u'-');
+    if (S_ISDIR(m)) s[0] = u'd';
+    else if (S_ISLNK(m)) s[0] = u'l';
+    else if (S_ISSOCK(m)) s[0] = u's';
+    else if (S_ISFIFO(m)) s[0] = u'p';
+    else if (S_ISCHR(m)) s[0] = u'c';
+    else if (S_ISBLK(m)) s[0] = u'b';
+    const char16_t* rwx = u"rwxrwxrwx";
     for (int i = 0; i < 9; ++i)
-        if (m & (0400 >> i)) s[i + 1] = QLatin1Char(rwx[i]);
-    if (m & S_ISUID) s[3] = (m & S_IXUSR) ? QLatin1Char('s') : QLatin1Char('S');
-    if (m & S_ISGID) s[6] = (m & S_IXGRP) ? QLatin1Char('s') : QLatin1Char('S');
-    if (m & S_ISVTX) s[9] = (m & S_IXOTH) ? QLatin1Char('t') : QLatin1Char('T');
+        if (m & (0400 >> i)) s[i + 1] = QChar(rwx[i]);
+    if (m & S_ISUID) s[3] = (m & S_IXUSR) ? u's' : u'S';
+    if (m & S_ISGID) s[6] = (m & S_IXGRP) ? u's' : u'S';
+    if (m & S_ISVTX) s[9] = (m & S_IXOTH) ? u't' : u'T';
     return s;
 }
 
 QString date_text(qint64 t) {
-    return t > 0 ? QDateTime::fromSecsSinceEpoch(t).toString(QStringLiteral("yyyy-MM-dd HH:mm")) : QString();
+    return t > 0 ? QDateTime::fromSecsSinceEpoch(t).toString(u"yyyy-MM-dd HH:mm"_s) : QString();
 }
 
 QString size_text(qint64 n) { return QLocale().formattedDataSize(n, 1, QLocale::DataSizeTraditionalFormat); }
@@ -167,8 +169,8 @@ void ResultModel::onRows(qint64 id, qint64 from, const QCborArray& rows) {
 
 void ResultModel::loadStat(const Row& x) const {
     struct statx sx {};
-    const QByteArray p = QFile::encodeName(x.dir == QLatin1String("/") ? QLatin1Char('/') + x.name
-                                                                     : x.dir + QLatin1Char('/') + x.name);
+    const QByteArray p = QFile::encodeName(x.dir == u"/"_s ? u'/' + x.name
+                                                                     : x.dir + u'/' + x.name);
     if (statx(AT_FDCWD, p.constData(), AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC, STATX_ATIME | STATX_BLOCKS, &sx) == 0) {
         x.atime = (sx.stx_mask & STATX_ATIME) ? qint64(sx.stx_atime.tv_sec) : 0;
         x.disk = (sx.stx_mask & STATX_BLOCKS) ? qint64(sx.stx_blocks) * 512 : 0;
@@ -180,13 +182,13 @@ void ResultModel::loadStat(const Row& x) const {
 QString ResultModel::fullPath(int r) const {
     const Row* x = row(r);
     if (!x || x->name.isEmpty()) return {};
-    return x->dir == QLatin1String("/") ? QLatin1Char('/') + x->name : x->dir + QLatin1Char('/') + x->name;
+    return x->dir == u"/"_s ? u'/' + x->name : x->dir + u'/' + x->name;
 }
 
 QVariant ResultModel::data(const QModelIndex& idx, int role) const {
     if (!idx.isValid()) return {};
     const Row* x = row(idx.row());
-    if (!x) return role == Qt::DisplayRole && idx.column() == Name ? QStringLiteral("…") : QVariant();
+    if (!x) return role == Qt::DisplayRole && idx.column() == Name ? u"…"_s : QVariant();
     switch (role) {
         case Qt::DisplayRole:
             switch (idx.column()) {
@@ -197,7 +199,7 @@ QVariant ResultModel::data(const QModelIndex& idx, int role) const {
                 case Modified: return date_text(x->mtime);
                 case Created: return date_text(x->btime);
                 case Extension: {
-                    const qsizetype dot = x->name.lastIndexOf(QLatin1Char('.'));
+                    const qsizetype dot = x->name.lastIndexOf(u'.');
                     return x->isdir || dot <= 0 ? QString() : x->name.mid(dot + 1);
                 }
                 case Type: return x->name.isEmpty() ? QString() : type_for(x->name, x->isdir);
@@ -220,7 +222,7 @@ QVariant ResultModel::data(const QModelIndex& idx, int role) const {
             break;
         case Qt::FontRole:
             if (idx.column() == Permissions) {
-                static const QFont mono(QStringLiteral("monospace"));
+                static const QFont mono(u"monospace"_s);
                 return mono;
             }
             break;
@@ -260,17 +262,17 @@ QString ResultModel::columnTitle(int c) {
 
 QString ResultModel::sortKey(int c) {
     switch (c) {
-        case Name: return QStringLiteral("name");
+        case Name: return u"name"_s;
         case Path:
-        case FullPath: return QStringLiteral("path");
-        case Size: return QStringLiteral("size");
-        case Modified: return QStringLiteral("mtime");
-        case Created: return QStringLiteral("btime");
+        case FullPath: return u"path"_s;
+        case Size: return u"size"_s;
+        case Modified: return u"mtime"_s;
+        case Created: return u"btime"_s;
         case Extension:
-        case Type: return QStringLiteral("ext");
-        case Owner: return QStringLiteral("owner");
-        case Group: return QStringLiteral("group");
-        case Permissions: return QStringLiteral("mode");
+        case Type: return u"ext"_s;
+        case Owner: return u"owner"_s;
+        case Group: return u"group"_s;
+        case Permissions: return u"mode"_s;
     }
     return {};
 }
@@ -289,7 +291,7 @@ Qt::ItemFlags ResultModel::flags(const QModelIndex& idx) const {
     return idx.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled : Qt::NoItemFlags;
 }
 
-QStringList ResultModel::mimeTypes() const { return {QStringLiteral("text/uri-list")}; }
+QStringList ResultModel::mimeTypes() const { return {u"text/uri-list"_s}; }
 
 QMimeData* ResultModel::mimeData(const QModelIndexList& indexes) const {
     QList<QUrl> urls;

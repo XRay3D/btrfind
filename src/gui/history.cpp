@@ -2,18 +2,20 @@
 
 #include <QSettings>
 
+using namespace Qt::StringLiterals;
+
 namespace bx {
 
 SearchHistory::SearchHistory() {
     QSettings s;
-    enabled_ = s.value(QStringLiteral("history/enabled"), true).toBool();
-    items_ = s.value(QStringLiteral("history/queries")).toStringList();
+    enabled_ = s.value(u"history/enabled"_s, true).toBool();
+    items_ = s.value(u"history/queries"_s).toStringList();
 }
 
 void SearchHistory::save() const {
     QSettings s;
-    s.setValue(QStringLiteral("history/enabled"), enabled_);
-    s.setValue(QStringLiteral("history/queries"), items_);
+    s.setValue(u"history/enabled"_s, enabled_);
+    s.setValue(u"history/queries"_s, items_);
 }
 
 void SearchHistory::add(const QString& query) {
