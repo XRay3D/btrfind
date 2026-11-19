@@ -39,6 +39,10 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#ifdef BTRFIND_HAVE_KIO
+#include <KPropertiesDialog>
+#endif
+
 using namespace Qt::StringLiterals;
 
 namespace bx {
@@ -342,6 +346,9 @@ void MainWindow::buildMenus() {
     edit->addSeparator();
     add(edit, tr("Выделить всё"), u"edit-select-all"_s, QKeySequence::SelectAll,
         [this] { currentView()->selectAll(); }, stack_);
+    edit->addSeparator();
+    add(edit, tr("Свойства"), u"document-properties"_s, QKeySequence(Qt::ALT | Qt::Key_Return),
+        [this] { showProperties(); }, stack_);
 
     QMenu* view = menuBar()->addMenu(tr("&Вид"));
     viewGroup_ = new QActionGroup(this);
@@ -967,6 +974,35 @@ void MainWindow::copyFiles() {  // как в файловом менеджере
     QApplication::clipboard()->setMimeData(md);
 }
 
+void MainWindow::showProperties() {
+    const qsizetype nrows = view_->selectionModel()->selectedRows().size();
+    if (nrows == 0) return;
+    const QStringList paths = selectedPaths();
+    if (paths.size() != nrows) {
+        statusBar()->showMessage(tr("Не все выделенные строки загружены — прокрутите к ним или выделите меньше"), 6000);
+        return;
+    }
+    commitHistory();
+    QList<QUrl> urls;
+    for (const QString& p : paths) urls << QUrl::fromLocalFile(p);
+#ifdef BTRFIND_HAVE_KIO
+    // Тот же диалог, что в Dolphin: размер папок, права, владелец, контрольные суммы…
+    // Немодальный — можно открыть несколько и продолжать поиск.
+    KPropertiesDialog::showDialog(urls, this, false);
+#else
+    QStringList uris;
+    for (const QUrl& u : std::as_const(urls)) uris << u.toString();
+    QDBusMessage msg = QDBusMessage::createMethodCall(u"org.freedesktop.FileManager1"_s,
+                                                      u"/org/freedesktop/FileManager1"_s,
+                                                      u"org.freedesktop.FileManager1"_s,
+                                                      u"ShowItemProperties"_s);
+    msg << uris << QString();
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 3000);
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        statusBar()->showMessage(tr("Не удалось открыть свойства: %1").arg(reply.errorMessage()), 6000);
+#endif
+}
+
 void MainWindow::showContextMenu(QAbstractItemView* v, const QPoint& pos) {
     const QModelIndex idx = v->indexAt(pos);
     if (!idx.isValid()) return;
@@ -1007,6 +1043,9 @@ void MainWindow::showContextMenu(QAbstractItemView* v, const QPoint& pos) {
     m.addSeparator();
     m.addAction(QIcon::fromTheme(u"system-search"_s), tr("Искать в «%1»").arg(isdir ? full : dir), this,
                 [this, isdir, full, dir] { setFolder(isdir ? full : dir); });
+    m.addSeparator();
+    m.addAction(QIcon::fromTheme(u"document-properties"_s), tr("Свойства"), QKeySequence(Qt::ALT | Qt::Key_Return),
+                this, &MainWindow::showProperties);
     m.exec(v->viewport()->mapToGlobal(pos));
 }
 

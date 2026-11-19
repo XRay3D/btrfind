@@ -57,6 +57,7 @@ private:
     void copyPaths();
     void copyNames();
     void copyFiles();
+    void showProperties();  // Alt+Enter: диалог «Свойства» для выделенных
     QString filterText() const;
     void restoreSelection(int first, int last);
     void renameSelected();
